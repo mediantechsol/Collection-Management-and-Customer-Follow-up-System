@@ -6,11 +6,33 @@
 
 ## 1) قاعدة البيانات
 
+مساران — اختر واحداً.
+
+### أ) بلا تثبيت أي شيء: لوحة التحكم
+
+مفاتيح الواجهة (`VITE_*`) **لا تصلح للترحيل**؛ هي تتحدث مع PostgREST ولا تستطيع
+إنشاء جداول أو سياسات. أبسط طريق بلا رمز وصول ولا كلمة مرور قاعدة بيانات:
+
+1. `SQL Editor` → `New query` → الصق **`supabase/migrate_all.sql`** كاملاً → Run.
+2. الصق `supabase/seed.sql` وشغّله.
+3. `Database → Extensions` → فعّل **pg_cron**، ثم شغّل
+   `supabase/migrations/20260101000005_cron.sql` وحده.
+
+> `migrate_all.sql` مولَّد آلياً من `migrations/` عبر `bash supabase/build_migrate_all.sh`.
+> ملف pg_cron مستثنى منه عمداً: محرر SQL ينفّذ اللصقة كمعاملة واحدة، فلو لم تكن
+> الإضافة مفعّلة لتراجع الترحيل كله بسببها.
+
+### ب) عبر Supabase CLI
+
 ```bash
-supabase link --project-ref <معرّف-المشروع>
+npm i -g supabase
+supabase login                                     # رمز وصول عبر المتصفح
+supabase link --project-ref <معرّف-المشروع>        # يطلب كلمة مرور قاعدة البيانات
 supabase db push                                   # يشغّل supabase/migrations بالترتيب
 supabase db execute --file supabase/seed.sql       # فئات افتراضية + الإعدادات
 ```
+
+هذا المسار مطلوب على أي حال لنشر Edge Function وتوليد الأنواع لاحقاً.
 
 الترحيلات بالترتيب:
 
@@ -46,8 +68,21 @@ npm install
 npm run dev                    # http://localhost:5173
 ```
 
-⚠️ لا تضع `service_role key` في `.env.local` — أي مفتاح باسم `VITE_*` يُحزَم في
-ملف JavaScript يُرسل لكل متصفح.
+⚠️ **المفتاح المطلوب هو العلني وحده**: `sb_publishable_…` (أو `anon` في المشاريع
+الأقدم). أي متغيّر باسم `VITE_*` يُحزَم حرفياً في ملف JavaScript يُرسل لكل متصفح.
+
+وضع المفتاح السري (`sb_secret_…` / `service_role`) هناك يعني أن كل زائر يحمل
+مفتاحاً **يتجاوز كل سياسات RLS** — أي أن نموذج الصلاحيات كله يصبح بلا أثر، ويستطيع
+أي مستخدم قراءة وتعديل وحذف كامل قاعدة البيانات من أدوات المطوّر.
+
+المفتاح السري له مكان واحد في هذا المشروع:
+
+```bash
+supabase secrets set SUPABASE_SERVICE_ROLE_KEY=...   # Edge Function فقط
+```
+
+إن سبق أن وُضع في `.env.local`، استبدله بالعلني ثم اضغط **Rotate** عليه من لوحة
+التحكم احتياطاً.
 
 ## 4) أول مدير نظام
 
