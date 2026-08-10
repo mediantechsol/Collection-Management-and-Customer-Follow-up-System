@@ -1,0 +1,30 @@
+# أسرار — لا تُرفع إطلاقاً
+.env
+.env.*
+!.env.example
+
+# بيانات عملاء حقيقية (ملفات Excel المستلمة من العميل + التسجيل الصوتي)
+المصادر/
+*.mp3
+
+# اعتماديات ومخرجات البناء
+node_modules/
+dist/
+dist-ssr/
+build/
+coverage/
+*.local
+*.tsbuildinfo
+
+# Supabase
+supabase/.branches/
+supabase/.temp/
+supabase/.env
+
+# محرّرات وأنظمة
+.DS_Store
+.vscode/*
+!.vscode/extensions.json
+.idea/
+*.log
+npm-debug.log*

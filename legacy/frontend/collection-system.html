@@ -1,0 +1,1555 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>نظام إدارة التحصيل ومتابعة العملاء</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Arabic:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500;600&display=swap" rel="stylesheet">
+<style>
+:root{
+  --blue-50:#EAF2FE; --blue-100:#D3E4FC; --blue-500:#3B6FF0; --blue-600:#2F5FE0; --blue-700:#2447B8; --blue-900:#0E1636;
+  --navy-900:#0B1130; --navy-800:#121A42; --navy-700:#1A2554;
+  --gray-25:#FAFBFC; --gray-50:#F5F6F8; --gray-100:#ECEEF1; --gray-200:#DDE1E6; --gray-300:#C3C9D1;
+  --gray-500:#8A93A0; --gray-600:#5F6874; --gray-700:#414952; --gray-900:#1B2027;
+  --green-500:#16A34A; --green-50:#EAFBF0; --amber-500:#D97706; --amber-50:#FEF6E7; --red-500:#DC2626; --red-50:#FDECEC;
+  --white:#FFFFFF; --radius:12px; --radius-sm:8px; --shadow:0 1px 2px rgba(16,24,40,.05), 0 1px 3px rgba(16,24,40,.06);
+  --shadow-md:0 4px 14px rgba(16,24,40,.08);
+  /* ألوان أنواع التنبيهات — نفس اللون يُستخدم بالبطاقة والشارة معاً لتناسق بصري */
+  --t-before-fg:#E23F6B; --t-before-bg:#FDEAF1;
+  --t-today-fg:#E23F3F; --t-today-bg:#FDEAEA;
+  --t-shopping-fg:#EF8C3C; --t-shopping-bg:#FDEEE0;
+  --t-promise-fg:#3E7BFA; --t-promise-bg:#EAF1FE;
+  --t-stale-fg:#DFA22E; --t-stale-bg:#FCF3DE;
+  --t-escalate-fg:#8B5CF6; --t-escalate-bg:#F1ECFE;
+}
+*{box-sizing:border-box; margin:0; padding:0;}
+body{font-family:'IBM Plex Sans Arabic',sans-serif; background:var(--gray-50); color:var(--gray-900); font-size:14px;}
+.mono{font-variant-numeric:tabular-nums; font-weight:600; letter-spacing:.1px;}
+button{font-family:inherit; cursor:pointer;}
+input,select,textarea{font-family:inherit;}
+svg{display:block;}
+
+#shell{display:flex; min-height:100vh;}
+
+/* Sidebar */
+#sidebar{
+  width:238px; background:linear-gradient(180deg,var(--navy-700),var(--navy-900)); color:#AEB9E0; flex-shrink:0;
+  display:flex; flex-direction:column; padding:18px 0 14px;
+}
+.sidebar-profile{padding:4px 18px 18px; text-align:center; border-bottom:1px solid rgba(255,255,255,.08); margin-bottom:10px;}
+.sidebar-profile .avatar{
+  width:52px; height:52px; border-radius:50%; background:linear-gradient(135deg,var(--blue-500),#6C4CF5);
+  color:#fff; display:flex; align-items:center; justify-content:center; font-size:18px; font-weight:700;
+  margin:0 auto 8px; position:relative;
+}
+.sidebar-profile .avatar .dot{position:absolute; bottom:1px; left:1px; width:11px; height:11px; border-radius:50%; background:var(--green-500); border:2px solid var(--navy-800);}
+.sidebar-profile .name{color:#fff; font-size:13.5px; font-weight:700;}
+.sidebar-profile .role{color:#8E9BD1; font-size:11px; margin-top:2px;}
+.nav-item{
+  padding:10px 16px; margin:2px 10px; border-radius:10px; font-size:13px; cursor:pointer; display:flex; align-items:center; gap:10px;
+  color:#AEB9E0; transition:all .12s; position:relative;
+}
+.nav-item svg{width:17px; height:17px; flex-shrink:0; opacity:.85;}
+.nav-item:hover{background:rgba(255,255,255,.07); color:#fff;}
+.nav-item.active{background:var(--blue-600); color:#fff; font-weight:600; box-shadow:0 2px 8px rgba(47,95,224,.4);}
+.nav-item.active svg{opacity:1;}
+.nav-item .item-badge{margin-inline-start:auto; background:var(--t-today-fg); color:#fff; font-size:10px; font-weight:700; border-radius:20px; padding:1px 6px; min-width:16px; text-align:center;}
+.sidebar-bottom{margin-top:auto; padding:10px 10px 0;}
+.sidebar-bottom .nav-item{color:#8E9BD1;}
+
+/* Main */
+#main{flex:1; display:flex; flex-direction:column; min-width:0;}
+#topbar{
+  background:var(--white); border-bottom:1px solid var(--gray-200); padding:14px 26px;
+  display:flex; align-items:center; justify-content:space-between; gap:16px;
+}
+#topbar h1{font-size:19px; font-weight:700;}
+#topbar .crumb{font-size:11.5px; color:var(--gray-500); margin-top:2px;}
+.role-switch{display:flex; align-items:center; gap:10px; font-size:12px; color:var(--gray-600);}
+.badge-role{padding:3px 11px; border-radius:20px; font-size:11px; font-weight:600; background:var(--blue-50); color:var(--blue-700);}
+
+#content{flex:1; padding:24px 26px; overflow-x:hidden;}
+
+/* Cards / stats */
+.stat-grid{display:grid; grid-template-columns:repeat(4,1fr); gap:14px; margin-bottom:22px;}
+.stat-card{background:var(--white); border:1px solid var(--gray-200); border-radius:var(--radius); padding:16px; box-shadow:var(--shadow);}
+.stat-card .lbl{font-size:12px; color:var(--gray-600); margin-bottom:6px;}
+.stat-card .val{font-size:26px; font-weight:700; color:var(--blue-700); font-variant-numeric:tabular-nums;}
+.stat-card .val.danger{color:var(--red-500);}
+.stat-card .sub{font-size:11px; color:var(--gray-500); margin-top:4px;}
+
+/* بطاقات ملونة بأيقونة (مركز التنبيهات وما شابه) */
+.type-grid{display:grid; grid-template-columns:repeat(6,1fr); gap:12px; margin-bottom:20px;}
+.type-card{
+  background:var(--white); border:1px solid var(--gray-200); border-radius:var(--radius); padding:14px 16px 12px;
+  box-shadow:var(--shadow); cursor:pointer; transition:box-shadow .15s, transform .1s; text-align:right;
+}
+.type-card:hover{box-shadow:var(--shadow-md); transform:translateY(-1px);}
+.type-card.active{border-color:var(--blue-500); box-shadow:0 0 0 2px var(--blue-100);}
+.type-card .icon-badge{width:36px; height:36px; border-radius:10px; display:flex; align-items:center; justify-content:center; margin-bottom:10px;}
+.type-card .icon-badge svg{width:18px; height:18px;}
+.type-card .t-label{font-size:12px; font-weight:600; color:var(--gray-700); margin-bottom:6px; min-height:32px;}
+.type-card .t-val{font-size:22px; font-weight:700; color:var(--gray-900); font-variant-numeric:tabular-nums;}
+.type-card .t-unit{font-size:11px; color:var(--gray-500); margin-bottom:8px;}
+.type-card .t-link{font-size:11px; color:var(--blue-600); font-weight:600;}
+@media (max-width:1200px){.type-grid{grid-template-columns:repeat(3,1fr);}}
+@media (max-width:640px){.type-grid{grid-template-columns:repeat(2,1fr);}}
+
+.section-title{font-size:14px; font-weight:600; margin:22px 0 10px; color:var(--gray-900);}
+.section-title:first-child{margin-top:0;}
+
+/* Table */
+.table-wrap{background:var(--white); border:1px solid var(--gray-200); border-radius:var(--radius); overflow:hidden; box-shadow:var(--shadow);}
+table{width:100%; border-collapse:collapse; font-size:13px;}
+thead th{background:var(--gray-50); text-align:right; padding:11px 14px; font-weight:700; color:var(--gray-600); font-size:11.5px; border-bottom:1px solid var(--gray-200); white-space:nowrap;}
+tbody td{padding:13px 14px; border-bottom:1px solid var(--gray-100); vertical-align:middle;}
+tbody tr:last-child td{border-bottom:none;}
+tbody tr:hover{background:var(--gray-25);}
+.row-click{cursor:pointer;}
+
+.pill{display:inline-flex; align-items:center; gap:4px; padding:4px 12px; border-radius:20px; font-size:11px; font-weight:700;}
+.pill-green{background:var(--green-50); color:var(--green-500);}
+.pill-amber{background:var(--amber-50); color:var(--amber-500);}
+.pill-red{background:var(--red-50); color:var(--red-500);}
+.pill-gray{background:var(--gray-100); color:var(--gray-600);}
+.pill-blue{background:var(--blue-50); color:var(--blue-700);}
+
+.cat-dot{display:inline-block; width:8px; height:8px; border-radius:50%; margin-left:6px;}
+
+/* Toolbar */
+.toolbar{display:flex; gap:10px; margin-bottom:14px; flex-wrap:wrap; align-items:center;}
+.toolbar input[type=text], .toolbar select, .toolbar input[type=date]{
+  padding:8px 12px; border:1px solid var(--gray-200); border-radius:20px; background:var(--white); font-size:13px;
+}
+.toolbar input[type=text]{flex:1; min-width:180px;}
+.btn{padding:8px 16px; border-radius:20px; font-size:13px; font-weight:600; border:1px solid transparent; display:inline-flex; align-items:center; gap:6px;}
+.btn svg{width:14px; height:14px;}
+.btn-primary{background:var(--blue-600); color:#fff;}
+.btn-primary:hover{background:var(--blue-700);}
+.btn-outline{background:var(--white); border-color:var(--gray-300); color:var(--gray-700);}
+.btn-outline:hover{background:var(--gray-50);}
+.btn-sm{padding:5px 13px; font-size:12px;}
+.btn-danger{background:var(--red-50); color:var(--red-500); border-color:var(--red-50);}
+
+/* Modal */
+.overlay{position:fixed; inset:0; background:rgba(20,24,30,0.5); display:none; align-items:center; justify-content:center; z-index:100; padding:16px;}
+.overlay.show{display:flex;}
+.modal{background:var(--white); border-radius:10px; width:100%; max-width:480px; max-height:90vh; overflow-y:auto; box-shadow:0 20px 60px rgba(0,0,0,0.25);}
+.modal.wide{max-width:640px;}
+.modal-header{padding:16px 20px; border-bottom:1px solid var(--gray-100); display:flex; justify-content:space-between; align-items:center;}
+.modal-header h2{font-size:15px; font-weight:600;}
+.modal-header .x{cursor:pointer; color:var(--gray-500); font-size:18px; line-height:1;}
+.modal-body{padding:18px 20px;}
+.modal-footer{padding:14px 20px; border-top:1px solid var(--gray-100); display:flex; justify-content:flex-end; gap:8px;}
+.field{margin-bottom:13px;}
+.field label{display:block; font-size:12px; font-weight:600; color:var(--gray-600); margin-bottom:5px;}
+.field input, .field select, .field textarea{
+  width:100%; padding:9px 12px; border:1px solid var(--gray-200); border-radius:6px; font-size:13px; background:var(--white);
+}
+.field input:focus, .field select:focus, .field textarea:focus{outline:none; border-color:var(--blue-500);}
+.grid-2{display:grid; grid-template-columns:1fr 1fr; gap:0 12px;}
+
+/* Detail page */
+.detail-header{background:var(--white); border:1px solid var(--gray-200); border-radius:var(--radius); padding:18px 20px; margin-bottom:18px; box-shadow:var(--shadow);}
+.detail-grid{display:grid; grid-template-columns:2fr 1fr; gap:18px;}
+.info-row{display:flex; justify-content:space-between; padding:7px 0; border-bottom:1px solid var(--gray-100); font-size:13px;}
+.info-row:last-child{border-bottom:none;}
+.info-row .k{color:var(--gray-600);}
+.info-row .v{font-weight:600;}
+
+.tabs{display:flex; gap:2px; border-bottom:1px solid var(--gray-200); margin-bottom:14px;}
+.tab-btn{padding:9px 16px; font-size:13px; font-weight:600; color:var(--gray-500); border-bottom:2px solid transparent; background:none; border-top:none;border-right:none;border-left:none;}
+.tab-btn.active{color:var(--blue-700); border-bottom-color:var(--blue-600);}
+
+.empty-state{text-align:center; padding:50px 20px; color:var(--gray-500); font-size:13px;}
+.back-link{font-size:13px; color:var(--blue-600); font-weight:600; cursor:pointer; margin-bottom:14px; display:inline-block;}
+
+.toast{position:fixed; bottom:20px; left:50%; transform:translateX(-50%) translateY(20px); background:var(--gray-900); color:#fff; padding:10px 20px; border-radius:6px; font-size:13px; opacity:0; transition:all .25s; z-index:200; pointer-events:none;}
+.toast.show{opacity:1; transform:translateX(-50%) translateY(0);}
+.toast.err{background:var(--red-500);}
+
+.log-line{font-size:12px; padding:9px 14px; border-bottom:1px solid var(--gray-100); display:flex; gap:10px;}
+.log-line .who{font-weight:600; min-width:90px;}
+.log-line .what{color:var(--gray-600); flex:1;}
+.log-line .when{color:var(--gray-500);}
+
+.dropzone{border:2px dashed var(--gray-300); border-radius:var(--radius); padding:34px; text-align:center; color:var(--gray-500); font-size:13px; background:var(--white);}
+.dropzone input{display:none;}
+
+@media (max-width:900px){
+  #sidebar{width:64px;} #sidebar .sidebar-profile,#sidebar .nav-item span,#sidebar .item-badge{display:none;}
+  .stat-grid{grid-template-columns:1fr 1fr;} .detail-grid{grid-template-columns:1fr;}
+}
+
+/* Login screen */
+#loginScreen{min-height:100vh; display:flex; align-items:center; justify-content:center; background:var(--blue-900); padding:16px;}
+.login-card{background:var(--white); border-radius:12px; width:100%; max-width:380px; padding:28px 26px; box-shadow:0 20px 60px rgba(0,0,0,0.3);}
+.login-card h1{font-size:16px; font-weight:700; margin-bottom:2px;}
+.login-card .sub{font-size:12px; color:var(--gray-500); margin-bottom:18px;}
+.login-warning{background:var(--amber-50); color:#8A5A00; border:1px solid #F0D9A8; border-radius:6px; padding:10px 12px; font-size:11.5px; line-height:1.6; margin-bottom:18px;}
+.login-error{background:var(--red-50); color:var(--red-500); border-radius:6px; padding:8px 12px; font-size:12px; margin-bottom:12px; display:none;}
+.login-error.show{display:block;}
+.login-hint{margin-top:18px; padding-top:14px; border-top:1px solid var(--gray-100); font-size:11px; color:var(--gray-500);}
+.login-hint table{width:100%; margin-top:6px; border-collapse:collapse;}
+.login-hint td{padding:3px 4px; font-family:'IBM Plex Mono',monospace; font-size:11px;}
+.login-btn{width:100%; padding:11px; margin-top:6px;}
+</style>
+</head>
+<body>
+
+<div id="loginScreen">
+  <div class="login-card">
+    <h1>نظام إدارة التحصيل ومتابعة العملاء</h1>
+    <div class="sub">مكتب الدكتور أيمن لخدمات الدواجن</div>
+    <div class="login-warning">
+      ⚠️ دخول تجريبي لأغراض معاينة الشاشات فقط. كلمات المرور هنا غير مشفّرة وغير آمنة — هذا النموذج الأولي لا يحتوي مصادقة حقيقية. قبل أي استخدام فعلي يجب استبدال هذه الشاشة بمصادقة Supabase Auth (راجع ملف 01_link_auth.sql).
+    </div>
+    <div class="login-error" id="loginError"></div>
+    <div class="field"><label>اسم المستخدم</label><input type="text" id="loginUsername" placeholder="مثال: ayman"></div>
+    <div class="field"><label>كلمة المرور</label><input type="password" id="loginPassword" placeholder="••••••••"></div>
+    <button class="btn btn-primary login-btn" id="loginBtn">تسجيل الدخول</button>
+    <div class="login-hint">
+      بيانات تجريبية للمعاينة:
+      <table>
+        <tr><td>ayman / ayman123</td><td>مدير النظام</td></tr>
+        <tr><td>accountant / acc123</td><td>المحاسب</td></tr>
+        <tr><td>sami / sami123</td><td>مسؤول تحصيل</td></tr>
+        <tr><td>khaled / khaled123</td><td>مسؤول تحصيل (موقوف — لتجربة رفض الدخول)</td></tr>
+      </table>
+    </div>
+  </div>
+</div>
+
+<div id="shell" style="display:none;">
+  <nav id="sidebar">
+    <div class="sidebar-profile" id="sidebarProfile"></div>
+    <div id="navList"></div>
+    <div class="sidebar-bottom">
+      <div class="nav-item" id="sidebarLogout"></div>
+    </div>
+  </nav>
+  <div id="main">
+    <div id="topbar">
+      <div>
+        <h1 id="pageTitle">لوحة المدير</h1>
+        <div class="crumb" id="pageCrumb"></div>
+      </div>
+      <div class="role-switch">
+        <span class="badge-role" id="roleBadge"></span>
+      </div>
+    </div>
+    <div id="content"></div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<!-- generic modal mount points -->
+<div class="overlay" id="overlayCustomer"><div class="modal" id="modalCustomer"></div></div>
+<div class="overlay" id="overlayFollowup"><div class="modal wide" id="modalFollowup"></div></div>
+<div class="overlay" id="overlayUser"><div class="modal wide" id="modalUser"></div></div>
+<div class="overlay" id="overlayCategory"><div class="modal" id="modalCategory"></div></div>
+<div class="overlay" id="overlayImportPreview"><div class="modal wide" id="modalImportPreview"></div></div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script>
+/* ============================================================================
+   منطق العمل الصافي — مطابق حرفياً لملف logic.js الذي تم اختباره بـ 22 اختبار
+   قبل تضمينه هنا (راجع test_logic.js المرفق منفصلاً)
+   ============================================================================ */
+function daysBetween(a,b){const MS=86400000; return Math.round((new Date(b)-new Date(a))/MS);}
+function addDays(dateStr,days){const d=new Date(dateStr+"T00:00:00"); d.setDate(d.getDate()+Number(days||0)); return d.toISOString().slice(0,10);}
+function calcNewDueDate(dueDate,g1,g2,g3){const t=(Number(g1)||0)+(Number(g2)||0)+(Number(g3)||0); return addDays(dueDate,t);}
+function calcRemainingDays(newDueDate,today){return daysBetween(today,newDueDate);}
+function calcTotalDueYER(usd,sar,yer,rateUsd,rateSar){return (Number(usd)||0)*(Number(rateUsd)||0)+(Number(sar)||0)*(Number(rateSar)||0)+(Number(yer)||0);}
+function calcIncentiveAmount(amount,rate){return (Number(amount)||0)*(Number(rate)||0)/100;}
+function calcRemainingAmount(due,received,delivered){return (Number(due)||0)-(Number(received)||0)-(Number(delivered)||0);}
+
+function generateDailyNotifications(customers,dueByCustomer,followups,settings,today){
+  const out=[];
+  for(const c of customers){
+    if(!c.is_active || !c.assigned_user_id) continue;
+    const due=dueByCustomer[c.id];
+    if(due && due.remaining_days===3) out.push({customer_id:c.id,user_id:c.assigned_user_id,notification_type:"قبل الاستحقاق بـ 3 أيام",notification_date:today});
+    if(due && due.remaining_days===0) out.push({customer_id:c.id,user_id:c.assigned_user_id,notification_type:"يوم الاستحقاق",notification_date:today});
+    if(c.status_customer==="يسوق الآن") out.push({customer_id:c.id,user_id:c.assigned_user_id,notification_type:"يسوق الآن",notification_date:today});
+    const custF=followups.filter(f=>f.customer_id===c.id);
+    const recent=custF.some(f=>daysBetween(f.followup_date,today)<=(settings.no_followup_days_limit??14));
+    if(!recent) out.push({customer_id:c.id,user_id:c.assigned_user_id,notification_type:"لم تتم متابعته منذ مدة",notification_date:today});
+  }
+  for(const f of followups){
+    if(f.next_followup_date===today && (f.contact_result||"").includes("وعد")){
+      const c=customers.find(c=>c.id===f.customer_id);
+      if(c && c.assigned_user_id) out.push({customer_id:f.customer_id,user_id:c.assigned_user_id,notification_type:"وعد بالسداد اليوم",notification_date:today});
+    }
+  }
+  return out;
+}
+
+const EXPECTED_COLUMNS=["رقم العميل","اسم العميل","مدين","دائن","ملاحظات"];
+const CURRENCY_ORDER=["YER","USD","SAR"]; // الترتيب الرسمي المعتمد: يمني ثم دولار ثم سعودي
+
+// اكتشاف صف رأس كل قسم ديناميكياً بدل الاعتماد على أرقام صفوف ثابتة (651/1041 كانت تشير
+// لصف عنوان القسم فعلياً وليس رأس الأعمدة، واكتشفنا هذا من الملف الرسمي الحقيقي)
+function findSectionHeaderRows(rows){
+  const headerRows=[];
+  for(let r=0;r<rows.length;r++){
+    const row=rows[r]||[];
+    const c0=String(row[0]??"").trim(), c1=String(row[1]??"").trim();
+    if(c0==="رقم العميل" && c1==="اسم العميل") headerRows.push(r);
+  }
+  return headerRows;
+}
+
+function parseBalancesSheet(rows){
+  const errors=[],warnings=[],parsed=[],counts={YER:0,USD:0,SAR:0};
+  const headerRows=findSectionHeaderRows(rows);
+  if(headerRows.length!==3){
+    errors.push(`تم العثور على ${headerRows.length} قسم بدل 3 أقسام متوقعة (يمني/دولار/سعودي). تأكد أن كل قسم يبدأ بصف رؤوس أعمدة مطابق تماماً: "رقم العميل، اسم العميل، مدين، دائن، ملاحظات"`);
+    return {ok:false,errors,warnings,rows:parsed,counts};
+  }
+  headerRows.forEach((headerIdx,i)=>{
+    const currency=CURRENCY_ORDER[i];
+    const headerRow=(rows[headerIdx]||[]).map(h=>String(h??"").trim());
+    const missing=EXPECTED_COLUMNS.filter(c=>!headerRow.includes(c));
+    if(missing.length){ errors.push(`قسم ${currency} (صف ${headerIdx+1}): أعمدة مفقودة: ${missing.join("، ")}`); return; }
+    const idx={number:headerRow.indexOf("رقم العميل"),name:headerRow.indexOf("اسم العميل"),debit:headerRow.indexOf("مدين"),credit:headerRow.indexOf("دائن"),notes:headerRow.indexOf("ملاحظات")};
+    const endRow = i+1<headerRows.length ? headerRows[i+1] : rows.length;
+    for(let r=headerIdx+1;r<endRow;r++){
+      const row=rows[r];
+      if(!row||row.every(c=>c===undefined||c===null||c==="")) continue;
+      const customer_number=String(row[idx.number]??"").trim();
+      const customer_name=String(row[idx.name]??"").trim();
+      if(!customer_number||!customer_name){ warnings.push(`صف ${r+1} (${currency}): رقم أو اسم عميل مفقود — تم تجاوزه`); continue; }
+      parsed.push({customer_number,customer_name,debit:Number(row[idx.debit])||0,credit:Number(row[idx.credit])||0,notes:row[idx.notes]?String(row[idx.notes]):null,currency,source_row:r+1});
+      counts[currency]++;
+    }
+  });
+  return {ok:errors.length===0,errors,warnings,rows:parsed,counts};
+}
+
+/* ============================================================================
+   الحالة والتخزين
+   ----------------------------------------------------------------------------
+   ⚠️ ملاحظة معمارية مهمة (اقرأها قبل المتابعة):
+   هذا الملف نموذج أولي (Prototype) بالكامل من جهة العميل (Client-Side فقط).
+   الدالتان أدناه تعتمدان على window.storage، وهي واجهة برمجية خاصة بمعاينة
+   الـ Artifacts داخل Claude.ai فقط — وليست معياراً في الويب.
+   لجعل الملف قابلاً للتشغيل بشكل مستقل في أي متصفح (خارج Claude)، تمت إضافة
+   طبقة توافق (Shim) تحاكي نفس الواجهة باستخدام localStorage عندما لا تكون
+   window.storage متوفرة. هذا يحل مشكلة "التشغيل" فقط — لا يحوّل النظام إلى
+   نظام إنتاجي حقيقي:
+     - localStorage تخزين محلي في متصفح المستخدم نفسه فقط، لا يُشارك بين
+       الأجهزة أو المستخدمين، ويُفقد لو تم مسح بيانات المتصفح.
+     - لا يوجد مصادقة حقيقية (انظر تحذير شاشة الدخول أدناه).
+     - للانتقال لنظام إنتاجي فعلي متعدد المستخدمين، راجع:
+       PROMPT.md (ملف المشروع) وملفات database/*.sql (قاعدة بيانات Postgres/Supabase
+       جاهزة ومصممة لتطابق كل قواعد العمل المطبّقة هنا حرفياً).
+   ============================================================================ */
+if(!window.storage){
+  window.storage = {
+    async get(key){
+      const v = localStorage.getItem(key);
+      return v!==null ? {key, value:v, shared:false} : null;
+    },
+    async set(key, value){
+      localStorage.setItem(key, value);
+      return {key, value, shared:false};
+    },
+    async delete(key){
+      const existed = localStorage.getItem(key)!==null;
+      localStorage.removeItem(key);
+      return {key, deleted:existed, shared:false};
+    },
+    async list(prefix){
+      const keys = Object.keys(localStorage).filter(k=>!prefix || k.startsWith(prefix));
+      return {keys, prefix, shared:false};
+    }
+  };
+}
+
+const STORE_KEY="collection-system-state-v1";
+let ST=null;
+const $=s=>document.querySelector(s);
+const $$=s=>document.querySelectorAll(s);
+const uid=()=>Date.now().toString(36)+Math.random().toString(36).slice(2,7);
+const todayStr=()=>new Date().toISOString().slice(0,10);
+const fmt=n=>(Number(n)||0).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
+function esc(s){return String(s??"").replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));}
+
+function seedState(){
+  const roles=[
+    {id:"r-admin",name_role:"مدير النظام"},
+    {id:"r-accountant",name_role:"المحاسب"},
+    {id:"r-collector",name_role:"مسؤول التحصيل"},
+    {id:"r-custom",name_role:"مستخدم مخصص"},
+  ];
+  const users=[
+    // ⚠️ password هنا نص صريح لأغراض معاينة النموذج الأولي فقط — غير آمن إطلاقاً.
+    // بالإنتاج الفعلي: لا يوجد عمود password هنا أصلاً، المصادقة عبر Supabase Auth (auth.users) حصراً.
+    {id:"u-ayman",full_name:"د. أيمن نجيب",username:"ayman",password:"ayman123",phone:"777000001",role_id:"r-admin",status:"نشط",
+      allowed_screens:["dashboard","followups","customers","notifications","import","performance","users"], allowed_category_ids:[]},
+    {id:"u-acc",full_name:"محمد المحاسب",username:"accountant",password:"acc123",phone:"777000002",role_id:"r-accountant",status:"نشط",
+      allowed_screens:["dashboard","followups","customers","notifications","import","performance"], allowed_category_ids:[]},
+    {id:"u-col1",full_name:"سامي التحصيل",username:"sami",password:"sami123",phone:"777000003",role_id:"r-collector",status:"نشط",
+      allowed_screens:["dashboard","followups","customers","notifications","performance"], allowed_category_ids:["cat-a","cat-b"],
+      screen_permissions:{
+        customers:{actions:{create:false, edit:true, deactivate:false}, hidden_fields:["status_customer"]},
+        followups:{actions:{create:true}, hidden_fields:[]},
+      }},
+    {id:"u-col2",full_name:"خالد التحصيل",username:"khaled",password:"khaled123",phone:"777000004",role_id:"r-collector",status:"موقوف",
+      allowed_screens:["followups","customers","notifications"], allowed_category_ids:["cat-c"],
+      screen_permissions:{
+        customers:{actions:{create:false, edit:false, deactivate:false}, hidden_fields:[]},
+        followups:{actions:{create:true}, hidden_fields:["assigned_user"]},
+      }},
+  ];
+  const customerCategories=[
+    {id:"cat-a",category_name:"فئة أ - عملاء كبار",color:"#2563EB",incentive_rate:3,is_active:true},
+    {id:"cat-b",category_name:"فئة ب - عملاء متوسطون",color:"#16A34A",incentive_rate:2,is_active:true},
+    {id:"cat-c",category_name:"فئة ج - عملاء صغار",color:"#D97706",incentive_rate:1,is_active:true},
+  ];
+  const customers=[
+    {id:"c1",customer_number:"1001",customer_name:"محل الأمين للمواد الغذائية",mobile_1:"711111111",mobile_2:"",guarantor:"أخوه ياسر",status_customer:"يسوق الآن",customer_category_id:"cat-a",description:"عميل قديم وملتزم غالباً",assigned_user_id:"u-col1",is_active:true},
+    {id:"c2",customer_number:"1002",customer_name:"صالون النور",mobile_1:"733333333",mobile_2:"",guarantor:"",status_customer:"",customer_category_id:"cat-b",description:"",assigned_user_id:"u-col1",is_active:true},
+    {id:"c3",customer_number:"1003",customer_name:"مكتبة الجيل",mobile_1:"788888888",mobile_2:"799999999",guarantor:"صاحب المحل المجاور",status_customer:"",customer_category_id:"cat-c",description:"يحتاج متابعة عن قرب",assigned_user_id:"u-col2",is_active:true},
+    {id:"c4",customer_number:"1004",customer_name:"مطعم الشرق",mobile_1:"712121212",mobile_2:"",guarantor:"",status_customer:"",customer_category_id:"cat-a",description:"",assigned_user_id:"u-col2",is_active:true},
+  ];
+  const today=todayStr();
+  const balances=[
+    {id:uid(),customer_id:"c1",currency:"YER",debit:250000,credit:50000,import_id:null},
+    {id:uid(),customer_id:"c1",currency:"USD",debit:120,credit:0,import_id:null},
+    {id:uid(),customer_id:"c2",currency:"YER",debit:80000,credit:0,import_id:null},
+    {id:uid(),customer_id:"c3",currency:"SAR",debit:600,credit:100,import_id:null},
+    {id:uid(),customer_id:"c4",currency:"YER",debit:400000,credit:400000,import_id:null},
+  ];
+  const dueDates=[
+    {id:uid(),customer_id:"c1",due_date:addDays(today,3),grace_1:0,grace_2:0,grace_3:0,assigned_user_id:"u-col1"},
+    {id:uid(),customer_id:"c2",due_date:today,grace_1:0,grace_2:0,grace_3:0,assigned_user_id:"u-col1"},
+    {id:uid(),customer_id:"c3",due_date:addDays(today,-10),grace_1:2,grace_2:0,grace_3:0,assigned_user_id:"u-col2"},
+    {id:uid(),customer_id:"c4",due_date:addDays(today,20),grace_1:0,grace_2:0,grace_3:0,assigned_user_id:"u-col2"},
+  ];
+  const followups=[
+    {id:uid(),customer_id:"c3",user_id:"u-col2",followup_date:addDays(today,-25),followup_time:"10:00",type_followup:"اتصال",contact_result:"لم يرد",next_followup_date:null,details:"لا رد",description_customer:"",level_seriousness:"متوسط",expected_collection_amount:0},
+    {id:uid(),customer_id:"c2",user_id:"u-col1",followup_date:today,followup_time:"09:30",type_followup:"واتساب",contact_result:"وعد بالسداد اليوم مساءً",next_followup_date:today,details:"قال بيرسل التحويل اليوم",description_customer:"متعاون",level_seriousness:"منخفض",expected_collection_amount:80000},
+  ];
+  return {
+    roles, users, customerCategories, customers, balances, dueDates, followups,
+    notifications:[], incentives:[], incentivePayments:[], excelImports:[], activityLogs:[],
+    settings:{exchange_rate_usd:530, exchange_rate_sar:141, no_followup_days_limit:14},
+    currentUserId:null,
+    isLoggedIn:false,
+    view:{name:"dashboard"},
+  };
+}
+
+async function loadState(){
+  try{
+    const res=await window.storage.get(STORE_KEY,false);
+    ST = res && res.value ? JSON.parse(res.value) : seedState();
+  }catch(e){
+    ST = seedState();
+    await saveState();
+  }
+  if(ST.isLoggedIn && ST.currentUserId){
+    showApp();
+  }else{
+    showLogin();
+  }
+}
+async function saveState(){
+  try{ await window.storage.set(STORE_KEY, JSON.stringify(ST), false); }
+  catch(e){ showToast("تعذر حفظ البيانات محلياً",true); }
+}
+
+/* ---------------------------- تسجيل الدخول (تجريبي — غير آمن، راجع التنبيه بالشاشة) ---------------------------- */
+function showLogin(){
+  $("#shell").style.display="none";
+  $("#loginScreen").style.display="flex";
+  $("#loginError").classList.remove("show");
+  $("#loginUsername").value=""; $("#loginPassword").value="";
+  const btn=$("#loginBtn");
+  if(btn.dataset.built!=="1"){
+    btn.dataset.built="1";
+    btn.addEventListener("click", attemptLogin);
+    $("#loginPassword").addEventListener("keydown", e=>{ if(e.key==="Enter") attemptLogin(); });
+    $("#loginUsername").addEventListener("keydown", e=>{ if(e.key==="Enter") attemptLogin(); });
+  }
+  $("#loginUsername").focus();
+}
+function showApp(){
+  $("#loginScreen").style.display="none";
+  $("#shell").style.display="flex";
+  render();
+}
+function attemptLogin(){
+  const username=$("#loginUsername").value.trim();
+  const password=$("#loginPassword").value;
+  const errEl=$("#loginError");
+  const user=ST.users.find(u=>u.username===username);
+  if(!user || user.password!==password){
+    errEl.textContent="اسم المستخدم أو كلمة المرور غير صحيحة";
+    errEl.classList.add("show");
+    return;
+  }
+  if(user.status!=="نشط"){
+    errEl.textContent="هذا المستخدم موقوف — راجع مدير النظام";
+    errEl.classList.add("show");
+    return;
+  }
+  ST.currentUserId=user.id;
+  ST.isLoggedIn=true;
+  ST.view={name:"dashboard"};
+  logActivity("login","users",user.id,null,null);
+  saveState();
+  showApp();
+}
+function logout(){
+  logActivity("logout","users",ST.currentUserId,null,null);
+  ST.isLoggedIn=false;
+  saveState();
+  showLogin();
+}
+function showToast(msg,isErr){
+  const t=$("#toast"); t.textContent=msg; t.className="toast show"+(isErr?" err":"");
+  setTimeout(()=>t.classList.remove("show"),2400);
+}
+function logActivity(action_type,table_name,record_id,old_value,new_value){
+  ST.activityLogs.unshift({id:uid(),user_id:ST.currentUserId,action_type,table_name,record_id:String(record_id),old_value:old_value||null,new_value:new_value||null,created_at:new Date().toISOString()});
+}
+
+/* ============================================================================
+   الصلاحيات
+   الأدوار الأربعة تحدد الإطار العام (حسب المواصفات)، وفوقها كل مستخدم له:
+   - allowed_screens: الشاشات المسموح له بفتحها
+   - allowed_category_ids: فئات العملاء المسموح له برؤيتها (فارغة = كل الفئات)
+   هذا التقييد الإضافي هو ما طلبه صاحب المشروع فوق الأدوار الثابتة.
+   ============================================================================ */
+const ALL_SCREENS=["dashboard","followups","customers","notifications","import","performance","users"];
+
+function currentUser(){ return ST.users.find(u=>u.id===ST.currentUserId); }
+function roleName(u){ const r=ST.roles.find(r=>r.id===(u||currentUser()).role_id); return r?r.name_role:""; }
+function isAdmin(){ return roleName()==="مدير النظام"; }
+function isAccountant(){ return roleName()==="المحاسب"; }
+function isCollector(){ return roleName()==="مسؤول التحصيل"; }
+
+function allowedScreens(u){
+  u = u || currentUser();
+  return Array.isArray(u.allowed_screens) ? u.allowed_screens : ALL_SCREENS;
+}
+function hasScreenAccess(screenKey, u){
+  return allowedScreens(u).includes(screenKey);
+}
+function allowedCategoryIds(u){
+  u = u || currentUser();
+  return Array.isArray(u.allowed_category_ids) ? u.allowed_category_ids : [];
+}
+
+function visibleCustomers(){
+  let list;
+  if(isCollector()){
+    list = ST.customers.filter(c=>c.assigned_user_id===ST.currentUserId);
+  }else{
+    list = ST.customers; // مدير/محاسب/مخصص: كل العملاء، ثم يُطبَّق قيد الفئة أدناه إن وُجد
+  }
+  const cats = allowedCategoryIds();
+  if(cats.length){
+    list = list.filter(c => c.customer_category_id && cats.includes(c.customer_category_id));
+  }
+  return list;
+}
+function canSeeCustomer(customerId){
+  return visibleCustomers().some(c=>c.id===customerId);
+}
+function canImport(){ return isAdmin()||isAccountant(); }
+
+/* ----------------------------------------------------------------------------
+   صلاحيات على مستوى الإجراء (create/edit/deactivate) وعلى مستوى الحقل (إظهار/إخفاء عمود)
+   لكل مستخدم لحاله فوق شاشاته المسموحة — هذا هو المطلوب: "أظهر له كذا، لا تفتح له كذا"
+   القاعدة: u.screen_permissions[screen] = {actions..., hidden_fields:[...]}
+   أي مفتاح إجراء مو محدد صراحة بيرجع لصلاحية الدور الافتراضية (roleDefaultAction)
+---------------------------------------------------------------------------- */
+const FIELD_CATALOG={
+  customers:[
+    {key:"customer_number",label:"رقم العميل"},{key:"customer_name",label:"اسم العميل"},
+    {key:"mobile_1",label:"الجوال 1"},{key:"mobile_2",label:"الجوال 2"},
+    {key:"total_due",label:"المستحق بالريال"},
+    {key:"category",label:"الفئة"},{key:"guarantor",label:"الضامن / الضمانة"},
+    {key:"status_customer",label:"الحالة"},{key:"assigned_user",label:"المسؤول"},
+  ],
+  followups:[
+    {key:"due_date",label:"تاريخ الاستحقاق"},{key:"customer_name",label:"اسم العميل"},
+    {key:"mobile_1",label:"الجوال"},
+    {key:"remaining",label:"المتبقي عليه"},{key:"status_pill",label:"حالة الاستحقاق"},
+    {key:"assigned_user",label:"مسؤول المتابعة"},
+    {key:"next_appointment",label:"موعد المتابعة القادمة"},{key:"last_followup_details",label:"تفاصيل آخر متابعة"},
+  ],
+  users:[
+    {key:"full_name",label:"الاسم"},{key:"username",label:"اسم المستخدم"},{key:"role",label:"الدور"},
+    {key:"screens",label:"الشاشات المسموحة"},{key:"categories",label:"فئات العملاء المسموحة"},{key:"status",label:"الحالة"},
+  ],
+};
+const ACTION_CATALOG={
+  customers:[{key:"create",label:"إضافة عميل جديد"},{key:"edit",label:"تعديل بيانات العميل"},{key:"deactivate",label:"إيقاف/تنشيط العميل"}],
+  followups:[{key:"create",label:"إضافة متابعة"}],
+  users:[{key:"create",label:"إضافة مستخدم"},{key:"edit",label:"تعديل صلاحيات مستخدم"},{key:"deactivate",label:"إيقاف/تنشيط مستخدم"}],
+  performance:[{key:"create",label:"إضافة فئة عملاء"}],
+};
+
+// صلاحية الإجراء الافتراضية حسب الدور فقط (تُستخدم إذا ما في تخصيص صريح لهذا المستخدم)
+function roleDefaultAction(roleNm, screen, action){
+  if(roleNm==="مدير النظام") return true;
+  if(screen==="customers"){
+    if(action==="create"||action==="edit") return roleNm==="المحاسب";
+    if(action==="deactivate") return false;
+  }
+  if(screen==="followups" && action==="create") return true; // أي مستخدم يشوف العميل يقدر يضيف متابعة افتراضياً
+  if(screen==="users") return false;
+  if(screen==="performance" && action==="create") return false;
+  return false;
+}
+
+function screenAction(screen, action, u){
+  u = u || currentUser();
+  const sp = u.screen_permissions && u.screen_permissions[screen];
+  if(sp && Object.prototype.hasOwnProperty.call(sp,"actions") && Object.prototype.hasOwnProperty.call(sp.actions,action)){
+    return !!sp.actions[action];
+  }
+  return roleDefaultAction(roleName(u), screen, action);
+}
+function isFieldHidden(screen, field, u){
+  u = u || currentUser();
+  const sp = u.screen_permissions && u.screen_permissions[screen];
+  return !!(sp && Array.isArray(sp.hidden_fields) && sp.hidden_fields.includes(field));
+}
+function visibleFields(screen, u){
+  return (FIELD_CATALOG[screen]||[]).filter(f=>!isFieldHidden(screen,f.key,u));
+}
+
+// أغلفة مختصرة تُستخدم بباقي الكود بدل الأسماء العامة القديمة
+function canEditCustomers(){ return screenAction("customers","edit"); }
+function canManageUsers(){ return isAdmin(); } // إدارة المستخدمين تبقى محصورة بالدور الأساسي كحد أدنى دائماً
+
+/* ============================================================================
+   حسابات مساعدة على مستوى العميل
+   ============================================================================ */
+function customerBalances(customerId){
+  const rows=ST.balances.filter(b=>b.customer_id===customerId);
+  const sum=(cur)=>rows.filter(b=>b.currency===cur).reduce((s,b)=>s+(b.debit-b.credit),0);
+  return {usd:sum("USD"),sar:sum("SAR"),yer:sum("YER")};
+}
+function customerTotalYER(customerId){
+  const b=customerBalances(customerId);
+  return calcTotalDueYER(b.usd,b.sar,b.yer,ST.settings.exchange_rate_usd,ST.settings.exchange_rate_sar);
+}
+function customerDue(customerId){ return ST.dueDates.find(d=>d.customer_id===customerId); }
+function customerDueComputed(customerId){
+  const d=customerDue(customerId);
+  if(!d) return null;
+  const new_due_date=calcNewDueDate(d.due_date,d.grace_1,d.grace_2,d.grace_3);
+  const remaining_days=calcRemainingDays(new_due_date,todayStr());
+  return {...d,new_due_date,remaining_days};
+}
+function userName(id){ const u=ST.users.find(u=>u.id===id); return u?u.full_name:"—"; }
+function categoryOf(customerId){ const c=ST.customers.find(c=>c.id===customerId); return ST.customerCategories.find(cc=>cc.id===c?.customer_category_id); }
+
+/* ============================================================================
+   التوجيه والعرض
+   ============================================================================ */
+/* ============================================================================
+   الأيقونات ونظام ألوان أنواع التنبيهات — تُستخدم بالقائمة الجانبية، لوحة المدير، ومركز التنبيهات
+   ============================================================================ */
+const ICONS={
+  dashboard:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="9" rx="1.5"/><rect x="14" y="3" width="7" height="5" rx="1.5"/><rect x="14" y="12" width="7" height="9" rx="1.5"/><rect x="3" y="16" width="7" height="5" rx="1.5"/></svg>',
+  followups:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M22 16.9v3a2 2 0 0 1-2.2 2 19.8 19.8 0 0 1-8.6-3.1 19.5 19.5 0 0 1-6-6 19.8 19.8 0 0 1-3.1-8.7A2 2 0 0 1 4.1 2h3a2 2 0 0 1 2 1.7c.1 1 .3 2 .6 2.9a2 2 0 0 1-.5 2.1L8 9.9a16 16 0 0 0 6 6l1.2-1.2a2 2 0 0 1 2.1-.5c.9.3 1.9.5 2.9.6a2 2 0 0 1 1.8 2.1z"/></svg>',
+  customers:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.9"/><path d="M16 3.1a4 4 0 0 1 0 7.8"/></svg>',
+  notifications:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/></svg>',
+  import:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M17 8l-5-5-5 5"/><path d="M12 3v12"/></svg>',
+  performance:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><rect x="7" y="12" width="3" height="6"/><rect x="12.5" y="8" width="3" height="10"/><rect x="18" y="5" width="3" height="13"/></svg>',
+  users:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="M9 12l2 2 4-4"/></svg>',
+  logout:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="M16 17l5-5-5-5"/><path d="M21 12H9"/></svg>',
+  calendar:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></svg>',
+  calendarAlert:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/><path d="M12 14v3"/><circle cx="12" cy="19.2" r=".4" fill="currentColor" stroke="none"/></svg>',
+  userCheck:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M17 11l2 2 4-4"/></svg>',
+  handshake:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M11 12l3 3-2 2a2 2 0 1 1-3-3"/><path d="M14 15l2-2"/><path d="M2 11l5-5 4 3h3l4 4-3 3-2-1"/><path d="M22 11l-5-5-3 2"/></svg>',
+  clock:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/></svg>',
+  eye:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>',
+  plus:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg>',
+};
+
+// نمط موحّد لكل نوع تنبيه: نفس اللون على البطاقة والشارة معاً — يُستخدم بلوحة المدير ومركز التنبيهات
+const NOTIF_STYLE={
+  "قبل الاستحقاق بـ 3 أيام": {fg:"var(--t-before-fg)", bg:"var(--t-before-bg)", icon:ICONS.calendar},
+  "يوم الاستحقاق": {fg:"var(--t-today-fg)", bg:"var(--t-today-bg)", icon:ICONS.calendarAlert},
+  "يسوق الآن": {fg:"var(--t-shopping-fg)", bg:"var(--t-shopping-bg)", icon:ICONS.userCheck},
+  "وعد بالسداد اليوم": {fg:"var(--t-promise-fg)", bg:"var(--t-promise-bg)", icon:ICONS.handshake},
+  "لم تتم متابعته منذ مدة": {fg:"var(--t-stale-fg)", bg:"var(--t-stale-bg)", icon:ICONS.clock},
+  "يحتاج مراجعة المدير": {fg:"var(--t-escalate-fg)", bg:"var(--t-escalate-bg)", icon:ICONS.eye},
+};
+function notifPillHTML(type){
+  const s=NOTIF_STYLE[type];
+  if(!s) return `<span class="pill pill-blue">${esc(type)}</span>`;
+  return `<span class="pill" style="background:${s.bg}; color:${s.fg};">${esc(type)}</span>`;
+}
+
+const NAV_ITEMS=[
+  {key:"dashboard", label:"لوحة المدير"},
+  {key:"followups", label:"متابعة العملاء"},
+  {key:"customers", label:"العملاء"},
+  {key:"notifications", label:"التنبيهات"},
+  {key:"import", label:"استيراد Excel"},
+  {key:"performance", label:"الأداء والحوافز"},
+  {key:"users", label:"المستخدمون والصلاحيات"},
+];
+
+const VIEW_TITLES={dashboard:"لوحة المدير",followups:"متابعة العملاء",customers:"العملاء",notifications:"مركز التنبيهات",import:"استيراد ملف Excel",performance:"الأداء والحوافز",users:"المستخدمون والصلاحيات",detail:"تفاصيل العميل"};
+
+function navigate(name,params){
+  if(name!=="detail" && !hasScreenAccess(name)){
+    showToast("لا تملك صلاحية الوصول لهذه الشاشة",true);
+    name = hasScreenAccess("dashboard") ? "dashboard" : (allowedScreens()[0] || "dashboard");
+  }
+  ST.view={name,params:params||{}};
+  render();
+}
+
+function render(){
+  if(ST.view.name!=="detail" && !hasScreenAccess(ST.view.name)){
+    ST.view={name: hasScreenAccess("dashboard")?"dashboard":(allowedScreens()[0]||"dashboard"), params:{}};
+  }
+  renderSidebar();
+  renderTopbar();
+  const c=$("#content");
+  c.innerHTML="";
+  if(ST.view.name==="detail" && !canSeeCustomer(ST.view.params.id)){
+    c.innerHTML=`<div class="empty-state">لا تملك صلاحية مشاهدة هذا العميل (خارج نطاق الفئات أو العملاء المسموح بها لك)</div>`;
+    return;
+  }
+  switch(ST.view.name){
+    case "dashboard": renderDashboard(c); break;
+    case "followups": renderFollowupsList(c); break;
+    case "customers": renderCustomers(c); break;
+    case "detail": renderCustomerDetail(c, ST.view.params.id); break;
+    case "notifications": renderNotifications(c); break;
+    case "import": renderImport(c); break;
+    case "performance": renderPerformance(c); break;
+    case "users": renderUsers(c); break;
+    default: c.innerHTML="<div class='empty-state'>الشاشة غير موجودة</div>";
+  }
+}
+
+function unreadNotifCount(){
+  const mine = isAdmin()||isAccountant() ? ST.notifications : ST.notifications.filter(n=>n.user_id===ST.currentUserId);
+  return mine.filter(n=>n.status!=="تم التعامل").length;
+}
+
+function renderSidebar(){
+  const u=currentUser();
+  if(u){
+    const initials=(u.full_name||"").trim().split(/\s+/).slice(0,2).map(w=>w[0]).join("");
+    $("#sidebarProfile").innerHTML=`
+      <div class="avatar">${esc(initials)}<span class="dot"></span></div>
+      <div class="name">${esc(u.full_name)}</div>
+      <div class="role">${esc(roleName(u))}</div>`;
+  }
+
+  const unread=unreadNotifCount();
+  $("#navList").innerHTML=NAV_ITEMS.map(item=>{
+    if(!hasScreenAccess(item.key)) return "";
+    const active = ST.view.name===item.key || (ST.view.name==="detail" && item.key==="customers");
+    const badge = (item.key==="notifications" && unread>0) ? `<span class="item-badge">${unread>99?"99+":unread}</span>` : "";
+    return `<div class="nav-item ${active?"active":""}" data-view="${item.key}">${ICONS[item.key]}<span>${esc(item.label)}</span>${badge}</div>`;
+  }).join("");
+  $$("#navList .nav-item").forEach(el=>el.addEventListener("click",()=>navigate(el.dataset.view)));
+
+  const lo=$("#sidebarLogout");
+  lo.innerHTML=`${ICONS.logout}<span>تسجيل الخروج</span>`;
+  if(lo.dataset.built!=="1"){ lo.dataset.built="1"; lo.addEventListener("click", logout); }
+}
+function renderTopbar(){
+  $("#pageTitle").textContent = VIEW_TITLES[ST.view.name] || "";
+  $("#pageCrumb").textContent = "الرئيسية / " + (VIEW_TITLES[ST.view.name] || "");
+  $("#roleBadge").textContent = roleName();
+}
+
+/* ---------------------------- لوحة المدير ---------------------------- */
+function renderDashboard(c){
+  const visible=visibleCustomers();
+  const totalOutstanding=visible.reduce((s,cu)=>s+customerTotalYER(cu.id),0);
+  const todayNotifs=ST.notifications.filter(n=>n.notification_date===todayStr() && (isAdmin()||isAccountant()||n.user_id===ST.currentUserId));
+  const overdue=visible.filter(cu=>{ const d=customerDueComputed(cu.id); return d && d.remaining_days<0; });
+  const noFollowup=visible.filter(cu=>{
+    const fs=ST.followups.filter(f=>f.customer_id===cu.id);
+    return !fs.some(f=>daysBetween(f.followup_date,todayStr())<=ST.settings.no_followup_days_limit);
+  });
+
+  c.innerHTML=`
+  <div class="stat-grid">
+    <div class="stat-card">
+      <div class="icon-badge" style="background:var(--blue-50); color:var(--blue-700); width:32px; height:32px; border-radius:8px; display:flex; align-items:center; justify-content:center; margin-bottom:10px;"><span style="width:16px; height:16px; display:block;">${ICONS.performance}</span></div>
+      <div class="lbl">إجمالي المستحق (بالريال)</div><div class="val">${fmt(totalOutstanding)}</div><div class="sub">${visible.length} عميل ضمن نطاق صلاحيتك</div></div>
+    <div class="stat-card">
+      <div class="icon-badge" style="background:var(--t-today-bg); color:var(--t-today-fg); width:32px; height:32px; border-radius:8px; display:flex; align-items:center; justify-content:center; margin-bottom:10px;"><span style="width:16px; height:16px; display:block;">${ICONS.calendarAlert}</span></div>
+      <div class="lbl">عملاء متأخرون</div><div class="val danger">${overdue.length}</div><div class="sub">تجاوزوا تاريخ الاستحقاق الجديد</div></div>
+    <div class="stat-card">
+      <div class="icon-badge" style="background:var(--t-promise-bg); color:var(--t-promise-fg); width:32px; height:32px; border-radius:8px; display:flex; align-items:center; justify-content:center; margin-bottom:10px;"><span style="width:16px; height:16px; display:block;">${ICONS.notifications}</span></div>
+      <div class="lbl">تنبيهات اليوم</div><div class="val">${todayNotifs.length}</div><div class="sub">اضغط "التنبيهات" للتفاصيل</div></div>
+    <div class="stat-card">
+      <div class="icon-badge" style="background:var(--t-stale-bg); color:var(--t-stale-fg); width:32px; height:32px; border-radius:8px; display:flex; align-items:center; justify-content:center; margin-bottom:10px;"><span style="width:16px; height:16px; display:block;">${ICONS.clock}</span></div>
+      <div class="lbl">بدون متابعة حديثة</div><div class="val">${noFollowup.length}</div><div class="sub">تجاوزوا ${ST.settings.no_followup_days_limit} يوم بدون متابعة</div></div>
+  </div>
+
+  <div class="section-title">أعلى العملاء مديونية</div>
+  <div class="table-wrap"><table><thead><tr><th>العميل</th><th>الفئة</th><th>المسؤول</th><th>المستحق بالريال</th><th></th></tr></thead>
+  <tbody>${visible.slice().sort((a,b)=>customerTotalYER(b.id)-customerTotalYER(a.id)).slice(0,6).map(cu=>{
+    const cat=categoryOf(cu.id);
+    return `<tr class="row-click" data-open="${cu.id}">
+      <td>${esc(cu.customer_name)}</td>
+      <td>${cat?`<span class="cat-dot" style="background:${cat.color}"></span>${esc(cat.category_name)}`:"—"}</td>
+      <td>${esc(userName(cu.assigned_user_id))}</td>
+      <td class="mono">${fmt(customerTotalYER(cu.id))}</td>
+      <td style="color:var(--blue-600); font-weight:600;">تفاصيل ←</td>
+    </tr>`;
+  }).join("") || `<tr><td colspan="5" class="empty-state">لا يوجد عملاء بعد</td></tr>`}</tbody></table></div>
+
+  ${(isAdmin()||isAccountant())?`
+  <div class="section-title">آخر العمليات (سجل مصغّر)</div>
+  ${activityLogTableHTML(8)}
+  `:""}
+  `;
+  $$("[data-open]").forEach(el=>el.addEventListener("click",()=>navigate("detail",{id:el.dataset.open})));
+}
+
+/* ---------------------------- متابعة العملاء ---------------------------- */
+function lastFollowupOf(customerId){
+  const fs=ST.followups.filter(f=>f.customer_id===customerId).sort((a,b)=>new Date(b.followup_date)-new Date(a.followup_date));
+  return fs[0]||null;
+}
+
+function renderFollowupsList(c){
+  const q=(ST.view.params?.q||"").toLowerCase();
+  const catFilter=ST.view.params?.cat||"";
+  let list=visibleCustomers().filter(cu=>cu.is_active);
+  if(q) list=list.filter(cu=>cu.customer_name.toLowerCase().includes(q)||cu.customer_number.includes(q));
+  if(catFilter) list=list.filter(cu=>cu.customer_category_id===catFilter);
+  list=list.slice().sort((a,b)=>{
+    const da=customerDueComputed(a.id), db=customerDueComputed(b.id);
+    return (da?da.remaining_days:999)-(db?db.remaining_days:999);
+  });
+
+  const fields=visibleFields("followups");
+  const canAddFollowup=screenAction("followups","create");
+  const cellRenderers={
+    due_date: cu=>{ const d=customerDueComputed(cu.id); return `<td class="mono">${d?d.new_due_date:"—"}</td>`; },
+    customer_name: cu=>`<td class="row-click" data-open="${cu.id}" style="font-weight:600;">${esc(cu.customer_name)}</td>`,
+    mobile_1: cu=>`<td class="mono">${esc(cu.mobile_1||"—")}</td>`,
+    remaining: cu=>`<td class="mono">${fmt(customerTotalYER(cu.id))}</td>`,
+    status_pill: cu=>{
+      const d=customerDueComputed(cu.id);
+      let pill='<span class="pill pill-gray">—</span>';
+      if(d){
+        if(d.remaining_days<0) pill='<span class="pill pill-red">متأخر</span>';
+        else if(d.remaining_days<=3) pill='<span class="pill pill-amber">قريب الاستحقاق</span>';
+        else pill='<span class="pill pill-green">ضمن المهلة</span>';
+      }
+      return `<td>${pill}</td>`;
+    },
+    assigned_user: cu=>`<td>${esc(userName(cu.assigned_user_id))}</td>`,
+    next_appointment: cu=>{ const f=lastFollowupOf(cu.id); return `<td class="mono">${f&&f.next_followup_date?f.next_followup_date:"—"}</td>`; },
+    last_followup_details: cu=>{ const f=lastFollowupOf(cu.id); return `<td style="max-width:220px; font-size:12px; color:var(--gray-600);">${f&&f.details?esc(f.details):"—"}</td>`; },
+  };
+
+  c.innerHTML=`
+  <div class="toolbar">
+    <input type="text" id="fSearch" placeholder="ابحث بالاسم أو رقم العميل..." value="${esc(q)}">
+    <select id="fCatFilter">
+      <option value="">كل الفئات</option>
+      ${ST.customerCategories.map(cc=>`<option value="${cc.id}" ${catFilter===cc.id?"selected":""}>${esc(cc.category_name)}</option>`).join("")}
+    </select>
+  </div>
+  <div class="table-wrap"><table><thead><tr>
+    ${fields.map(f=>`<th>${esc(f.label)}</th>`).join("")}<th></th>
+  </tr></thead><tbody>
+  ${list.map(cu=>`<tr>${fields.map(f=>cellRenderers[f.key](cu)).join("")}
+      <td>
+        <button class="btn btn-outline btn-sm" data-open="${cu.id}">تفاصيل</button>
+        ${canAddFollowup?`<button class="btn btn-primary btn-sm" data-addfollow="${cu.id}">إضافة متابعة</button>`:""}
+      </td>
+    </tr>`).join("") || `<tr><td colspan="${fields.length+1}" class="empty-state">لا يوجد عملاء ضمن نطاق صلاحيتك</td></tr>`}
+  </tbody></table></div>`;
+
+  $("#fSearch").addEventListener("input",e=>{ ST.view.params={...ST.view.params,q:e.target.value}; renderFollowupsList($("#content")); });
+  $("#fCatFilter").addEventListener("change",e=>{ ST.view.params={...ST.view.params,cat:e.target.value}; renderFollowupsList($("#content")); });
+  $$("[data-open]").forEach(el=>el.addEventListener("click",()=>navigate("detail",{id:el.dataset.open})));
+  $$("[data-addfollow]").forEach(el=>el.addEventListener("click",()=>openFollowupModal(el.dataset.addfollow)));
+}
+
+/* ---------------------------- العملاء ---------------------------- */
+const CUSTOMER_CELL_RENDERERS={
+  customer_number: cu=>`<td class="mono">${esc(cu.customer_number)}</td>`,
+  customer_name: cu=>`<td class="row-click" data-open="${cu.id}" style="font-weight:600;">${esc(cu.customer_name)}</td>`,
+  mobile_1: cu=>`<td class="mono">${esc(cu.mobile_1||"—")}</td>`,
+  mobile_2: cu=>`<td class="mono">${esc(cu.mobile_2||"—")}</td>`,
+  guarantor: cu=>`<td>${esc(cu.guarantor||"—")}</td>`,
+  category: cu=>{ const cat=categoryOf(cu.id); return `<td>${cat?`<span class="cat-dot" style="background:${cat.color}"></span>${esc(cat.category_name)}`:"—"}</td>`; },
+  status_customer: cu=>`<td>${cu.is_active?'<span class="pill pill-green">نشط</span>':'<span class="pill pill-gray">موقوف</span>'}</td>`,
+  assigned_user: cu=>`<td>${esc(userName(cu.assigned_user_id))}</td>`,
+  total_due: cu=>`<td class="mono">${fmt(customerTotalYER(cu.id))}</td>`,
+};
+
+function renderCustomers(c){
+  const q=(ST.view.params?.q||"").toLowerCase();
+  const catFilter=ST.view.params?.cat||"";
+  let list=visibleCustomers();
+  if(q) list=list.filter(cu=>cu.customer_name.toLowerCase().includes(q)||cu.customer_number.includes(q));
+  if(catFilter) list=list.filter(cu=>cu.customer_category_id===catFilter);
+
+  const fields=visibleFields("customers");
+  const canCreate=screenAction("customers","create");
+  const canDeactivate=screenAction("customers","deactivate");
+
+  c.innerHTML=`
+  <div class="toolbar">
+    <input type="text" id="cSearch" placeholder="ابحث بالاسم أو رقم العميل..." value="${esc(q)}">
+    <select id="cCatFilter">
+      <option value="">كل الفئات</option>
+      ${ST.customerCategories.map(cc=>`<option value="${cc.id}" ${catFilter===cc.id?"selected":""}>${esc(cc.category_name)}</option>`).join("")}
+    </select>
+    ${canCreate?`<button class="btn btn-primary" id="addCustomerBtn">${ICONS.plus}عميل جديد</button>`:""}
+  </div>
+  <div class="table-wrap"><table><thead><tr>
+    ${fields.map(f=>`<th>${esc(f.label)}</th>`).join("")}${canDeactivate?"<th></th>":""}
+  </tr></thead><tbody>
+  ${list.map(cu=>`<tr>${fields.map(f=>CUSTOMER_CELL_RENDERERS[f.key](cu)).join("")}${canDeactivate?`<td><button class="btn btn-outline btn-sm" data-deactivate="${cu.id}">${cu.is_active?"إيقاف":"تنشيط"}</button></td>`:""}</tr>`).join("")
+    || `<tr><td colspan="${fields.length+1}" class="empty-state">لا يوجد عملاء</td></tr>`}
+  </tbody></table></div>`;
+
+  $("#cSearch").addEventListener("input",e=>{ ST.view.params={...ST.view.params,q:e.target.value}; renderCustomers($("#content")); });
+  $("#cCatFilter").addEventListener("change",e=>{ ST.view.params={...ST.view.params,cat:e.target.value}; renderCustomers($("#content")); });
+  $$("[data-open]").forEach(el=>el.addEventListener("click",()=>navigate("detail",{id:el.dataset.open})));
+  const addBtn=$("#addCustomerBtn"); if(addBtn) addBtn.addEventListener("click",()=>openCustomerModal(null));
+  $$("[data-deactivate]").forEach(el=>el.addEventListener("click",()=>{
+    const cu=ST.customers.find(x=>x.id===el.dataset.deactivate);
+    const old={is_active:cu.is_active}; cu.is_active=!cu.is_active;
+    logActivity("update","customers",cu.id,old,{is_active:cu.is_active});
+    saveState(); render();
+  }));
+}
+
+/* ---------------------------- تفاصيل العميل ---------------------------- */
+function renderCustomerDetail(c, id){
+  const cu=ST.customers.find(x=>x.id===id);
+  if(!cu){ c.innerHTML=`<div class="empty-state">العميل غير موجود</div>`; return; }
+  if(!canSeeCustomer(id)){
+    c.innerHTML=`<div class="empty-state">لا تملك صلاحية مشاهدة هذا العميل</div>`; return;
+  }
+  const cat=categoryOf(id);
+  const bal=customerBalances(id);
+  const totalYER=customerTotalYER(id);
+  const d=customerDueComputed(id);
+  const fs=ST.followups.filter(f=>f.customer_id===id).sort((a,b)=>new Date(b.followup_date)-new Date(a.followup_date));
+  const nots=ST.notifications.filter(n=>n.customer_id===id).sort((a,b)=>new Date(b.notification_date)-new Date(a.notification_date));
+
+  c.innerHTML=`
+  <div class="back-link" id="backLink">→ رجوع للعملاء</div>
+  <div class="detail-header">
+    <div style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:10px;">
+      <div>
+        <div style="font-size:18px; font-weight:700;">${esc(cu.customer_name)}</div>
+        <div class="mono" style="font-size:12px; color:var(--gray-500); margin-top:2px;">رقم العميل: ${esc(cu.customer_number)}</div>
+      </div>
+      <div style="text-align:left;">
+        <div style="font-size:11px; color:var(--gray-500);">إجمالي المستحق بالريال</div>
+        <div class="mono" style="font-size:22px; font-weight:700; color:var(--blue-700);">${fmt(totalYER)}</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="detail-grid">
+    <div>
+      <div class="section-title">بيانات العميل</div>
+      <div class="table-wrap" style="padding:14px 18px;">
+        <div class="info-row"><span class="k">الجوال 1</span><span class="v">${esc(cu.mobile_1||"—")}</span></div>
+        <div class="info-row"><span class="k">الجوال 2</span><span class="v">${esc(cu.mobile_2||"—")}</span></div>
+        <div class="info-row"><span class="k">الضامن / الضمانة</span><span class="v">${esc(cu.guarantor||"—")}</span></div>
+        <div class="info-row"><span class="k">الحالة</span><span class="v">${esc(cu.status_customer||"—")}</span></div>
+        <div class="info-row"><span class="k">فئة العميل</span><span class="v">${cat?esc(cat.category_name):"—"}</span></div>
+        <div class="info-row"><span class="k">مسؤول المتابعة</span><span class="v">${esc(userName(cu.assigned_user_id))}</span></div>
+        <div class="info-row"><span class="k">وصف العميل</span><span class="v">${esc(cu.description||"—")}</span></div>
+      </div>
+
+      <div class="section-title">الأرصدة حسب العملة</div>
+      <div class="table-wrap"><table><thead><tr><th>العملة</th><th>الرصيد</th></tr></thead><tbody>
+        <tr><td>دولار أمريكي (USD)</td><td class="mono">${fmt(bal.usd)}</td></tr>
+        <tr><td>ريال سعودي (SAR)</td><td class="mono">${fmt(bal.sar)}</td></tr>
+        <tr><td>ريال يمني (YER)</td><td class="mono">${fmt(bal.yer)}</td></tr>
+      </tbody></table></div>
+
+      <div class="section-title">سجل المتابعات (${fs.length})</div>
+      <div class="table-wrap">${fs.length?fs.map(f=>`
+        <div class="log-line" style="flex-direction:column; align-items:flex-start; gap:4px; padding:12px 14px;">
+          <div style="display:flex; justify-content:space-between; width:100%;">
+            <span style="font-weight:600;">${esc(f.type_followup)} — ${esc(userName(f.user_id))}</span>
+            <span class="mono" style="color:var(--gray-500);">${esc(f.followup_date)} ${esc(f.followup_time||"")}</span>
+          </div>
+          <div style="color:var(--gray-700);">${esc(f.contact_result||"—")}</div>
+          ${f.details?`<div style="color:var(--gray-500); font-size:12px;">${esc(f.details)}</div>`:""}
+        </div>
+      `).join("") : `<div class="empty-state">لا توجد متابعات مسجلة</div>`}</div>
+    </div>
+
+    <div>
+      <div class="section-title">الاستحقاق</div>
+      <div class="table-wrap" style="padding:14px 18px;">
+        ${d?`
+        <div class="info-row"><span class="k">تاريخ الاستحقاق</span><span class="v mono">${d.due_date}</span></div>
+        <div class="info-row"><span class="k">تاريخ الاستحقاق الجديد</span><span class="v mono">${d.new_due_date}</span></div>
+        <div class="info-row"><span class="k">الأيام المتبقية</span><span class="v" style="color:${d.remaining_days<0?'var(--red-500)':'var(--gray-900)'}">${d.remaining_days}</span></div>
+        `:`<div class="empty-state">لا يوجد تاريخ استحقاق مسجل</div>`}
+      </div>
+
+      <div class="section-title">التنبيهات (${nots.length})</div>
+      <div class="table-wrap">${nots.length?nots.map(n=>`
+        <div class="log-line">${notifPillHTML(n.notification_type)}<span class="when">${esc(n.notification_date)}</span></div>
+      `).join(""):`<div class="empty-state">لا توجد تنبيهات لهذا العميل</div>`}</div>
+
+      <div style="margin-top:14px; display:flex; flex-direction:column; gap:8px;">
+        ${screenAction("followups","create")?`<button class="btn btn-primary" id="addFollowBtn">تسجيل متابعة</button>`:""}
+        ${canEditCustomers()?`<button class="btn btn-outline" id="editCustBtn">تعديل بيانات العميل</button>`:""}
+        ${isCollector()?`<button class="btn btn-outline" id="escalateBtn">رفع الحالة للمدير</button>`:""}
+      </div>
+    </div>
+  </div>`;
+
+  $("#backLink").addEventListener("click",()=>navigate("customers"));
+  const addFollowBtn=$("#addFollowBtn"); if(addFollowBtn) addFollowBtn.addEventListener("click",()=>openFollowupModal(id));
+  const editBtn=$("#editCustBtn"); if(editBtn) editBtn.addEventListener("click",()=>openCustomerModal(cu));
+  const escBtn=$("#escalateBtn"); if(escBtn) escBtn.addEventListener("click",()=>{
+    ST.notifications.push({id:uid(),customer_id:id,user_id:"u-ayman",notification_type:"يحتاج مراجعة المدير",notification_date:todayStr(),status:"جديد"});
+    logActivity("escalate","customers",id,null,{note:"رفع الحالة للمدير"});
+    saveState(); showToast("تم رفع الحالة للمدير"); render();
+  });
+}
+
+/* ---------------------------- التنبيهات ---------------------------- */
+function renderNotifications(c){
+  const mine = isAdmin()||isAccountant() ? ST.notifications : ST.notifications.filter(n=>n.user_id===ST.currentUserId);
+  const dateFrom=ST.view.params?.from||"";
+  const dateTo=ST.view.params?.to||"";
+  const typeFilter=ST.view.params?.type||"";
+  let filtered=mine;
+  if(dateFrom) filtered=filtered.filter(n=>n.notification_date>=dateFrom);
+  if(dateTo) filtered=filtered.filter(n=>n.notification_date<=dateTo);
+  const filteredByDateOnly=filtered; // للعدّ بالبطاقات (قبل فلتر النوع)
+  if(typeFilter) filtered=filtered.filter(n=>n.notification_type===typeFilter);
+  const sorted=filtered.slice().sort((a,b)=>new Date(b.notification_date)-new Date(a.notification_date));
+
+  const typeCardsHTML=Object.keys(NOTIF_STYLE).map(type=>{
+    const s=NOTIF_STYLE[type];
+    const count=filteredByDateOnly.filter(n=>n.notification_type===type).length;
+    const active=typeFilter===type;
+    return `<div class="type-card ${active?"active":""}" data-typecard="${esc(type)}">
+      <div class="icon-badge" style="background:${s.bg}; color:${s.fg};">${s.icon}</div>
+      <div class="t-label">${esc(type)}</div>
+      <div class="t-val">${count}</div>
+      <div class="t-unit">عميل</div>
+    </div>`;
+  }).join("");
+
+  c.innerHTML=`
+  <div class="type-grid">${typeCardsHTML}</div>
+
+  <div class="toolbar">
+    <button class="btn btn-primary" id="genBtn">${ICONS.plus}توليد تنبيهات اليوم</button>
+    <span style="font-size:12px; color:var(--gray-500);">يطبّق القواعد الخمس الآلية (السادسة "يحتاج مراجعة المدير" ترفعها من تفاصيل العميل)</span>
+  </div>
+  <div class="toolbar">
+    <label style="font-size:12px; color:var(--gray-600); display:flex; align-items:center; gap:6px;">من <input type="date" id="nFrom" value="${esc(dateFrom)}"></label>
+    <label style="font-size:12px; color:var(--gray-600); display:flex; align-items:center; gap:6px;">إلى <input type="date" id="nTo" value="${esc(dateTo)}"></label>
+    ${(dateFrom||dateTo||typeFilter)?`<button class="btn btn-outline btn-sm" id="clearRangeBtn">إلغاء الفلترة</button>`:""}
+  </div>
+  <div class="section-title">قائمة التنبيهات</div>
+  <div class="table-wrap"><table><thead><tr><th>النوع</th><th>العميل</th><th>فئة العميل</th><th>التاريخ</th><th>المستهدف</th><th>الحالة</th><th></th></tr></thead>
+  <tbody>${sorted.map(n=>{
+    const cu=ST.customers.find(c=>c.id===n.customer_id);
+    const cat=cu?categoryOf(cu.id):null;
+    return `<tr>
+      <td>${notifPillHTML(n.notification_type)}</td>
+      <td class="row-click" data-open="${n.customer_id}">${esc(cu?cu.customer_name:"—")}</td>
+      <td>${cat?`<span class="cat-dot" style="background:${cat.color}"></span>${esc(cat.category_name)}`:"—"}</td>
+      <td class="mono">${esc(n.notification_date)}</td>
+      <td>${esc(userName(n.user_id))}</td>
+      <td>${n.status==="تم التعامل"?'<span class="pill pill-green">تم التعامل</span>':'<span class="pill pill-amber">جديد</span>'}</td>
+      <td>${n.status!=="تم التعامل"?`<button class="btn btn-outline btn-sm" data-handle="${n.id}">تعليم كمنجز</button>`:""}</td>
+    </tr>`;
+  }).join("") || `<tr><td colspan="7" class="empty-state">لا توجد تنبيهات ضمن هذا النطاق</td></tr>`}</tbody></table></div>`;
+
+  $$("[data-typecard]").forEach(el=>el.addEventListener("click",()=>{
+    const t=el.dataset.typecard;
+    ST.view.params={...ST.view.params, type: typeFilter===t ? "" : t};
+    renderNotifications($("#content"));
+  }));
+  $("#genBtn").addEventListener("click",()=>{
+    const dueByCustomer={};
+    ST.customers.forEach(cu=>{ const d=customerDueComputed(cu.id); if(d) dueByCustomer[cu.id]={remaining_days:d.remaining_days}; });
+    const newOnes=generateDailyNotifications(ST.customers, dueByCustomer, ST.followups, ST.settings, todayStr());
+    let added=0;
+    for(const n of newOnes){
+      const exists=ST.notifications.some(x=>x.customer_id===n.customer_id && x.notification_type===n.notification_type && x.notification_date===n.notification_date);
+      if(!exists){ ST.notifications.push({id:uid(),...n,status:"جديد"}); added++; }
+    }
+    saveState(); showToast(`تم توليد ${added} تنبيه جديد`); render();
+  });
+  $("#nFrom").addEventListener("change",e=>{ ST.view.params={...ST.view.params,from:e.target.value}; renderNotifications($("#content")); });
+  $("#nTo").addEventListener("change",e=>{ ST.view.params={...ST.view.params,to:e.target.value}; renderNotifications($("#content")); });
+  const clearBtn=$("#clearRangeBtn"); if(clearBtn) clearBtn.addEventListener("click",()=>{ ST.view.params={...ST.view.params,from:"",to:"",type:""}; renderNotifications($("#content")); });
+  $$("[data-open]").forEach(el=>el.addEventListener("click",()=>navigate("detail",{id:el.dataset.open})));
+  $$("[data-handle]").forEach(el=>el.addEventListener("click",()=>{
+    const n=ST.notifications.find(x=>x.id===el.dataset.handle);
+    n.status="تم التعامل"; saveState(); render();
+  }));
+}
+
+/* ---------------------------- استيراد Excel ---------------------------- */
+let importPreviewCache=null;
+function renderImport(c){
+  if(!canImport()){ c.innerHTML=`<div class="empty-state">صلاحية استيراد الملفات مقتصرة على المدير والمحاسب</div>`; return; }
+  c.innerHTML=`
+  <div class="section-title">اشتراطات بنية الملف</div>
+  <div class="table-wrap" style="padding:16px 18px; font-size:13px; line-height:1.9;">
+    <div style="margin-bottom:10px;">يجب أن يحتوي الملف على <b>نفس الأعمدة الخمسة بالترتيب</b> في كل قسم عملة، وأن يبدأ كل قسم بصف عناوين مطابق تماماً للأسماء التالية:</div>
+    <div class="mono" style="background:var(--gray-50); border:1px solid var(--gray-200); border-radius:6px; padding:8px 12px; margin-bottom:12px; font-size:12.5px;">
+      رقم العميل &nbsp;|&nbsp; اسم العميل &nbsp;|&nbsp; مدين &nbsp;|&nbsp; دائن &nbsp;|&nbsp; ملاحظات
+    </div>
+    <table style="width:100%; border-collapse:collapse; font-size:12.5px;">
+      <thead><tr>
+        <th style="text-align:right; padding:6px 8px; border-bottom:1px solid var(--gray-200);">القسم (العملة)</th>
+        <th style="text-align:right; padding:6px 8px; border-bottom:1px solid var(--gray-200);">مكان بداية القسم</th>
+      </tr></thead>
+      <tbody>
+        <tr><td style="padding:6px 8px;">الريال اليمني (YER)</td><td class="mono" style="padding:6px 8px;">أعلى الملف (الصف 1)</td></tr>
+        <tr><td style="padding:6px 8px;">الدولار الأمريكي (USD)</td><td class="mono" style="padding:6px 8px;">يبدأ من الصف 651</td></tr>
+        <tr><td style="padding:6px 8px;">الريال السعودي (SAR)</td><td class="mono" style="padding:6px 8px;">يبدأ من الصف 1041</td></tr>
+      </tbody>
+    </table>
+    <div style="margin-top:12px; font-size:11.5px; color:var(--gray-500);">
+      أي صف بدون "رقم العميل" أو "اسم العميل" يتم تجاوزه مع تحذير (مش خطأ يوقف الاستيراد). أي عمود ناقص من الأعمدة الخمسة بأي قسم يوقف الاستيراد بالكامل لذلك القسم ويظهر لك بالمعاينة قبل التأكيد.
+    </div>
+  </div>
+
+  <div class="section-title">استيراد ملف "أرصدة العملاء"</div>
+  <div class="dropzone" id="dropzone">
+    اسحب ملف Excel هنا أو اضغط للاختيار<br>
+    <span style="font-size:11px;">يجب أن يطابق البنية الموضحة أعلاه</span>
+    <input type="file" id="fileInput" accept=".xlsx,.xls">
+  </div>
+  <div class="section-title">سجل عمليات الاستيراد السابقة</div>
+  <div class="table-wrap"><table><thead><tr><th>الملف</th><th>النوع</th><th>بواسطة</th><th>التاريخ</th><th>الحالة</th></tr></thead>
+  <tbody>${ST.excelImports.slice().reverse().map(i=>`<tr>
+    <td>${esc(i.file_name)}</td><td>${esc(i.file_type)}</td><td>${esc(userName(i.imported_by))}</td>
+    <td class="mono">${esc(new Date(i.import_date).toLocaleString('ar-EG'))}</td>
+    <td>${i.status==="نجاح"?'<span class="pill pill-green">نجاح</span>':i.status==="تحذير"?'<span class="pill pill-amber">تحذير</span>':'<span class="pill pill-red">فشل</span>'}</td>
+  </tr>`).join("")||`<tr><td colspan="5" class="empty-state">لا توجد عمليات استيراد بعد</td></tr>`}</tbody></table></div>`;
+
+  const dz=$("#dropzone"), fi=$("#fileInput");
+  dz.addEventListener("click",()=>fi.click());
+  dz.addEventListener("dragover",e=>e.preventDefault());
+  dz.addEventListener("drop",e=>{ e.preventDefault(); if(e.dataTransfer.files[0]) handleImportFile(e.dataTransfer.files[0]); });
+  fi.addEventListener("change",e=>{ if(e.target.files[0]) handleImportFile(e.target.files[0]); });
+}
+
+function handleImportFile(file){
+  const reader=new FileReader();
+  reader.onload=(e)=>{
+    try{
+      const wb=XLSX.read(new Uint8Array(e.target.result),{type:"array"});
+      const sheet=wb.Sheets[wb.SheetNames[0]];
+      const rows=XLSX.utils.sheet_to_json(sheet,{header:1,raw:true});
+      const result=parseBalancesSheet(rows);
+      importPreviewCache={result,fileName:file.name};
+      openImportPreview();
+    }catch(err){
+      showToast("تعذّرت قراءة الملف: "+err.message,true);
+    }
+  };
+  reader.readAsArrayBuffer(file);
+}
+
+function openImportPreview(){
+  const {result,fileName}=importPreviewCache;
+  const modal=$("#modalImportPreview");
+  modal.innerHTML=`
+  <div class="modal-header"><h2>معاينة الاستيراد — ${esc(fileName)}</h2><span class="x" data-close="overlayImportPreview">✕</span></div>
+  <div class="modal-body">
+    ${result.ok?`<div class="pill pill-green" style="margin-bottom:10px;">الملف مطابق للبنية الرسمية</div>`:`<div class="pill pill-red" style="margin-bottom:10px;">يوجد أخطاء — لا يمكن الاستيراد</div>`}
+    ${result.errors.length?`<div style="background:var(--red-50); color:var(--red-500); padding:10px; border-radius:6px; font-size:12px; margin-bottom:10px;">${result.errors.map(esc).join("<br>")}</div>`:""}
+    ${result.warnings.length?`<div style="background:var(--amber-50); color:var(--amber-500); padding:10px; border-radius:6px; font-size:12px; margin-bottom:10px;">${result.warnings.slice(0,8).map(esc).join("<br>")}${result.warnings.length>8?`<br>+ ${result.warnings.length-8} تحذير إضافي`:""}</div>`:""}
+    <div style="display:flex; gap:16px; margin-bottom:12px; font-size:13px;">
+      <div>يمني: <b>${result.counts.YER}</b></div><div>دولار: <b>${result.counts.USD}</b></div><div>سعودي: <b>${result.counts.SAR}</b></div>
+      <div>الإجمالي: <b>${result.rows.length}</b> صف</div>
+    </div>
+    <div class="table-wrap" style="max-height:220px; overflow-y:auto;"><table><thead><tr><th>رقم العميل</th><th>الاسم</th><th>العملة</th><th>مدين</th><th>دائن</th></tr></thead>
+    <tbody>${result.rows.slice(0,10).map(r=>`<tr><td class="mono">${esc(r.customer_number)}</td><td>${esc(r.customer_name)}</td><td>${r.currency}</td><td class="mono">${fmt(r.debit)}</td><td class="mono">${fmt(r.credit)}</td></tr>`).join("")}</tbody></table></div>
+    <div style="font-size:11px; color:var(--gray-500); margin-top:6px;">عرض أول 10 صفوف فقط من ${result.rows.length}</div>
+  </div>
+  <div class="modal-footer">
+    <button class="btn btn-outline" data-close="overlayImportPreview">إلغاء</button>
+    ${result.ok?`<button class="btn btn-primary" id="confirmImportBtn">تأكيد الاستيراد (${result.rows.length} صف)</button>`:""}
+  </div>`;
+  $("#overlayImportPreview").classList.add("show");
+  $$('[data-close="overlayImportPreview"]').forEach(el=>el.addEventListener("click",()=>$("#overlayImportPreview").classList.remove("show")));
+  const confirmBtn=$("#confirmImportBtn");
+  if(confirmBtn) confirmBtn.addEventListener("click",commitImport);
+}
+
+function commitImport(){
+  const {result,fileName}=importPreviewCache;
+  const importId=uid();
+  let inserted=0, failed=0;
+  for(const row of result.rows){
+    let cu=ST.customers.find(c=>c.customer_number===row.customer_number);
+    if(!cu){
+      cu={id:uid(),customer_number:row.customer_number,customer_name:row.customer_name,mobile_1:"",mobile_2:"",guarantor:"",status_customer:"",customer_category_id:null,description:"",assigned_user_id:null,is_active:true};
+      ST.customers.push(cu);
+      logActivity("create","customers",cu.id,null,cu);
+    }
+    ST.balances.push({id:uid(),customer_id:cu.id,currency:row.currency,debit:row.debit,credit:row.credit,import_id:importId});
+    inserted++;
+  }
+  ST.excelImports.push({id:importId,file_name:fileName,file_type:"balances",imported_by:ST.currentUserId,import_date:new Date().toISOString(),status:failed?"تحذير":"نجاح",notes:result.warnings.length?`${result.warnings.length} تحذير أثناء الاستيراد`:null});
+  logActivity("import","excel_imports",importId,null,{file_name:fileName,inserted});
+  saveState();
+  $("#overlayImportPreview").classList.remove("show");
+  showToast(`تم استيراد ${inserted} سجل بنجاح`);
+  navigate("import");
+}
+
+/* ---------------------------- الأداء والحوافز ---------------------------- */
+function renderPerformance(c){
+  c.innerHTML=`
+  <div class="section-title">فئات العملاء</div>
+  <div class="toolbar">${isAdmin()?`<button class="btn btn-primary" id="addCatBtn">${ICONS.plus}فئة جديدة</button>`:""}</div>
+  <div class="table-wrap"><table><thead><tr><th>الفئة</th><th>نسبة الحافز</th><th>عدد العملاء</th><th>الحالة</th></tr></thead>
+  <tbody>${ST.customerCategories.map(cc=>{
+    const count=ST.customers.filter(cu=>cu.customer_category_id===cc.id).length;
+    return `<tr><td><span class="cat-dot" style="background:${cc.color}"></span>${esc(cc.category_name)}</td><td class="mono">${cc.incentive_rate}%</td><td>${count}</td><td>${cc.is_active?'<span class="pill pill-green">نشطة</span>':'<span class="pill pill-gray">موقوفة</span>'}</td></tr>`;
+  }).join("")}</tbody></table></div>
+
+  <div class="section-title">حوافز الموظفين</div>
+  <div class="table-wrap"><table><thead><tr><th>الموظف</th><th>مستحق</th><th>مصروف</th><th>متبقي</th></tr></thead>
+  <tbody>${ST.users.filter(u=>roleName(u)==="مسؤول التحصيل"||roleName(u)==="مستخدم مخصص").map(u=>{
+    const due=ST.incentives.filter(i=>i.user_id===u.id).reduce((s,i)=>s+i.incentive_amount,0);
+    const paid=ST.incentivePayments.filter(p=>p.user_id===u.id).reduce((s,p)=>s+p.amount,0);
+    return `<tr><td>${esc(u.full_name)}</td><td class="mono">${fmt(due)}</td><td class="mono">${fmt(paid)}</td><td class="mono">${fmt(due-paid)}</td></tr>`;
+  }).join("") || `<tr><td colspan="4" class="empty-state">لا يوجد موظفو تحصيل</td></tr>`}</tbody></table></div>`;
+
+  const addCat=$("#addCatBtn"); if(addCat) addCat.addEventListener("click",openCategoryModal);
+}
+
+/* ---------------------------- المستخدمون والصلاحيات ---------------------------- */
+const SCREEN_LABELS={dashboard:"لوحة المدير",followups:"متابعة العملاء",customers:"العملاء",notifications:"التنبيهات",import:"استيراد Excel",performance:"الأداء والحوافز",users:"المستخدمون"};
+
+function renderUsers(c){
+  if(!hasScreenAccess("users")){ c.innerHTML=`<div class="empty-state">لا تملك صلاحية الوصول لهذه الشاشة</div>`; return; }
+  const fields=visibleFields("users");
+  const canCreate=screenAction("users","create");
+  const canEdit=screenAction("users","edit");
+  const canDeactivate=screenAction("users","deactivate");
+  const cellRenderers={
+    full_name: u=>`<td style="font-weight:600;">${esc(u.full_name)}</td>`,
+    username: u=>`<td class="mono">${esc(u.username)}</td>`,
+    role: u=>`<td><span class="pill pill-blue">${esc(roleName(u))}</span></td>`,
+    screens: u=>{
+      const screens=allowedScreens(u);
+      const label = screens.length===ALL_SCREENS.length ? "كل الشاشات" : screens.map(s=>SCREEN_LABELS[s]||s).join("، ") || "لا شيء";
+      return `<td style="font-size:11.5px; color:var(--gray-600); max-width:200px;">${esc(label)}</td>`;
+    },
+    categories: u=>{
+      const cats=allowedCategoryIds(u);
+      const label = cats.length ? cats.map(id=>ST.customerCategories.find(cc=>cc.id===id)?.category_name||id).join("، ") : "كل الفئات";
+      return `<td style="font-size:11.5px; color:var(--gray-600); max-width:160px;">${esc(label)}</td>`;
+    },
+    status: u=>`<td>${u.status==="نشط"?'<span class="pill pill-green">نشط</span>':'<span class="pill pill-gray">موقوف</span>'}</td>`,
+  };
+
+  c.innerHTML=`
+  <div class="toolbar">${canCreate?`<button class="btn btn-primary" id="addUserBtn">${ICONS.plus}مستخدم جديد</button>`:""}</div>
+  <div class="table-wrap"><table><thead><tr>${fields.map(f=>`<th>${esc(f.label)}</th>`).join("")}${(canEdit||canDeactivate)?"<th></th>":""}</tr></thead>
+  <tbody>${ST.users.map(u=>`<tr>${fields.map(f=>cellRenderers[f.key](u)).join("")}
+    ${(canEdit||canDeactivate)?`<td style="white-space:nowrap;">
+      ${canEdit?`<button class="btn btn-outline btn-sm" data-edituser="${u.id}">تعديل الصلاحيات</button>`:""}
+      ${canDeactivate?`<button class="btn btn-outline btn-sm" data-toggleuser="${u.id}">${u.status==="نشط"?"إيقاف":"تنشيط"}</button>`:""}
+    </td>`:""}
+  </tr>`).join("")}</tbody></table></div>`;
+
+  const addBtn=$("#addUserBtn"); if(addBtn) addBtn.addEventListener("click",()=>openUserModal());
+  $$("[data-edituser]").forEach(el=>el.addEventListener("click",()=>openUserModal(ST.users.find(u=>u.id===el.dataset.edituser))));
+  $$("[data-toggleuser]").forEach(el=>el.addEventListener("click",()=>{
+    const u=ST.users.find(x=>x.id===el.dataset.toggleuser);
+    const old={status:u.status}; u.status=u.status==="نشط"?"موقوف":"نشط";
+    logActivity("update","users",u.id,old,{status:u.status});
+    saveState(); render();
+  }));
+}
+
+/* ---------------------------- سجل العمليات ---------------------------- */
+const TABLE_LABELS_AR={customers:"عميل",followups:"متابعة",users:"مستخدم",customer_categories:"فئة عملاء",excel_imports:"استيراد Excel",incentive_payments:"صرف حافز"};
+const ACTION_LABELS_AR={create:"إضافة",update:"تعديل",import:"استيراد",escalate:"رفع للمدير",login:"تسجيل دخول",logout:"تسجيل خروج"};
+
+function activityLogTableHTML(limit){
+  const logs=ST.activityLogs.slice(0,limit);
+  if(!logs.length) return `<div class="empty-state">لا توجد عمليات مسجلة بعد</div>`;
+  return `<div class="table-wrap"><table><thead><tr>
+    <th>اسم المستخدم</th><th>نوع المستند</th><th>العملية</th><th>التاريخ</th>
+  </tr></thead><tbody>${logs.map(l=>`<tr>
+    <td style="font-weight:600;">${esc(userName(l.user_id))}</td>
+    <td>${esc(TABLE_LABELS_AR[l.table_name]||l.table_name)}</td>
+    <td><span class="pill pill-blue">${esc(ACTION_LABELS_AR[l.action_type]||l.action_type)}</span></td>
+    <td class="mono">${new Date(l.created_at).toLocaleString('ar-EG')}</td>
+  </tr>`).join("")}</tbody></table></div>`;
+}
+
+/* ============================================================================
+   المودالات
+   ============================================================================ */
+function closeAllOverlays(){ $$(".overlay").forEach(o=>o.classList.remove("show")); }
+
+function openFollowupModal(customerId){
+  const cu=ST.customers.find(c=>c.id===customerId);
+  const modal=$("#modalFollowup");
+  modal.innerHTML=`
+  <div class="modal-header"><h2>إضافة متابعة — ${esc(cu.customer_name)}</h2><span class="x" data-close="overlayFollowup">✕</span></div>
+  <div class="modal-body">
+    <div class="grid-2">
+      <div class="field"><label>تاريخ المتابعة</label><input type="date" id="fDate" value="${todayStr()}"></div>
+      <div class="field"><label>وقت المتابعة</label><input type="time" id="fTime" value="${new Date().toTimeString().slice(0,5)}"></div>
+      <div class="field"><label>نوع المتابعة</label><select id="fType"><option>اتصال</option><option>واتساب</option><option>زيارة</option><option>أخرى</option></select></div>
+      <div class="field"><label>مستوى الجدية</label><select id="fLevel"><option value="عالي">عالي</option><option value="متوسط" selected>متوسط</option><option value="منخفض">منخفض</option></select></div>
+    </div>
+    <div class="field"><label>نتيجة التواصل</label><input type="text" id="fResult" placeholder="مثال: وعد بالسداد، لم يرد، تم السداد جزئياً..."></div>
+    <div class="grid-2">
+      <div class="field"><label>موعد المتابعة القادمة</label><input type="date" id="fNext"></div>
+      <div class="field"><label>المبلغ المتوقع تحصيله</label><input type="text" inputmode="decimal" id="fExpected" placeholder="0.00"></div>
+    </div>
+    <div class="field"><label>تفاصيل المتابعة</label><textarea id="fDetails" rows="3"></textarea></div>
+    <div class="field"><label>وصف العميل (اختياري)</label><input type="text" id="fDesc" value="${esc(cu.description||"")}"></div>
+  </div>
+  <div class="modal-footer">
+    <button class="btn btn-outline" data-close="overlayFollowup">إلغاء</button>
+    <button class="btn btn-primary" id="saveFollowupBtn">حفظ المتابعة</button>
+  </div>`;
+  $("#overlayFollowup").classList.add("show");
+  $$('[data-close="overlayFollowup"]').forEach(el=>el.addEventListener("click",()=>$("#overlayFollowup").classList.remove("show")));
+  $("#saveFollowupBtn").addEventListener("click",()=>{
+    const f={
+      id:uid(), customer_id:customerId, user_id:ST.currentUserId,
+      followup_date:$("#fDate").value||todayStr(), followup_time:$("#fTime").value,
+      type_followup:$("#fType").value, contact_result:$("#fResult").value.trim(),
+      next_followup_date:$("#fNext").value||null, details:$("#fDetails").value.trim(),
+      description_customer:$("#fDesc").value.trim(), level_seriousness:$("#fLevel").value,
+      expected_collection_amount:parseFloat($("#fExpected").value)||0,
+    };
+    ST.followups.push(f);
+    logActivity("create","followups",f.id,null,f);
+    saveState(); $("#overlayFollowup").classList.remove("show"); showToast("تم حفظ المتابعة"); render();
+  });
+}
+
+function openCustomerModal(existing){
+  const modal=$("#modalCustomer");
+  const isEdit=!!existing;
+  modal.innerHTML=`
+  <div class="modal-header"><h2>${isEdit?"تعديل بيانات العميل":"عميل جديد"}</h2><span class="x" data-close="overlayCustomer">✕</span></div>
+  <div class="modal-body">
+    <div class="grid-2">
+      <div class="field"><label>رقم العميل</label><input type="text" id="mNumber" value="${esc(existing?.customer_number||"")}" ${isEdit?"disabled":""}></div>
+      <div class="field"><label>اسم العميل</label><input type="text" id="mName" value="${esc(existing?.customer_name||"")}"></div>
+      <div class="field"><label>الجوال 1</label><input type="text" id="mMobile1" value="${esc(existing?.mobile_1||"")}"></div>
+      <div class="field"><label>الجوال 2</label><input type="text" id="mMobile2" value="${esc(existing?.mobile_2||"")}"></div>
+      <div class="field"><label>الضامن / الضمانة</label><input type="text" id="mGuarantor" value="${esc(existing?.guarantor||"")}"></div>
+      <div class="field"><label>الحالة</label><input type="text" id="mStatus" value="${esc(existing?.status_customer||"")}" placeholder="مثال: يسوق الآن"></div>
+      <div class="field"><label>فئة العميل</label><select id="mCategory"><option value="">بدون فئة</option>${ST.customerCategories.map(cc=>`<option value="${cc.id}" ${existing?.customer_category_id===cc.id?"selected":""}>${esc(cc.category_name)}</option>`).join("")}</select></div>
+      <div class="field"><label>مسؤول المتابعة</label><select id="mAssigned"><option value="">بدون تعيين</option>${ST.users.filter(u=>roleName(u)==="مسؤول التحصيل").map(u=>`<option value="${u.id}" ${existing?.assigned_user_id===u.id?"selected":""}>${esc(u.full_name)}</option>`).join("")}</select></div>
+    </div>
+    <div class="field"><label>وصف العميل</label><textarea id="mDesc" rows="2">${esc(existing?.description||"")}</textarea></div>
+  </div>
+  <div class="modal-footer">
+    <button class="btn btn-outline" data-close="overlayCustomer">إلغاء</button>
+    <button class="btn btn-primary" id="saveCustBtn">حفظ</button>
+  </div>`;
+  $("#overlayCustomer").classList.add("show");
+  $$('[data-close="overlayCustomer"]').forEach(el=>el.addEventListener("click",()=>$("#overlayCustomer").classList.remove("show")));
+  $("#saveCustBtn").addEventListener("click",()=>{
+    const name=$("#mName").value.trim();
+    if(!name){ showToast("اسم العميل مطلوب",true); return; }
+    if(isEdit){
+      const old={...existing};
+      Object.assign(existing,{
+        customer_name:name, mobile_1:$("#mMobile1").value.trim(), mobile_2:$("#mMobile2").value.trim(),
+        guarantor:$("#mGuarantor").value.trim(), status_customer:$("#mStatus").value.trim(),
+        customer_category_id:$("#mCategory").value||null, assigned_user_id:$("#mAssigned").value||null,
+        description:$("#mDesc").value.trim(),
+      });
+      logActivity("update","customers",existing.id,old,existing);
+    }else{
+      const num=$("#mNumber").value.trim();
+      if(!num){ showToast("رقم العميل مطلوب",true); return; }
+      if(ST.customers.some(c=>c.customer_number===num)){ showToast("رقم العميل موجود مسبقاً",true); return; }
+      const nc={id:uid(),customer_number:num,customer_name:name,mobile_1:$("#mMobile1").value.trim(),mobile_2:$("#mMobile2").value.trim(),guarantor:$("#mGuarantor").value.trim(),status_customer:$("#mStatus").value.trim(),customer_category_id:$("#mCategory").value||null,description:$("#mDesc").value.trim(),assigned_user_id:$("#mAssigned").value||null,is_active:true};
+      ST.customers.push(nc);
+      logActivity("create","customers",nc.id,null,nc);
+    }
+    saveState(); $("#overlayCustomer").classList.remove("show"); showToast("تم الحفظ"); render();
+  });
+}
+
+function permissionSectionHTML(existing){
+  const screens=Array.from(new Set([...Object.keys(ACTION_CATALOG),...Object.keys(FIELD_CATALOG)]));
+  const baseRole = existing ? roleName(existing) : roleName({role_id: $("#uRole")?.value || ST.roles[0].id});
+  return screens.map(screen=>{
+    const actions=ACTION_CATALOG[screen]||[];
+    const fields=FIELD_CATALOG[screen]||[];
+    const sp = existing && existing.screen_permissions && existing.screen_permissions[screen];
+    const actionsHTML = actions.length ? `
+      <div style="font-size:11px; color:var(--gray-500); font-weight:600; margin-bottom:5px;">الإجراءات المسموحة</div>
+      <div style="display:flex; flex-wrap:wrap; gap:4px 14px; margin-bottom:${fields.length?"10px":"0"};">
+        ${actions.map(a=>{
+          const explicit = sp && sp.actions && Object.prototype.hasOwnProperty.call(sp.actions,a.key);
+          const checked = explicit ? sp.actions[a.key] : roleDefaultAction(baseRole, screen, a.key);
+          return `<label style="display:flex; align-items:center; gap:5px; font-weight:400; font-size:12px;">
+            <input type="checkbox" class="permAction" data-screen="${screen}" data-action="${a.key}" ${checked?"checked":""}> ${esc(a.label)}
+          </label>`;
+        }).join("")}
+      </div>` : "";
+    const fieldsHTML = fields.length ? `
+      <div style="font-size:11px; color:var(--gray-500); font-weight:600; margin-bottom:5px;">الأعمدة الظاهرة بالجدول</div>
+      <div style="display:flex; flex-wrap:wrap; gap:4px 14px;">
+        ${fields.map(f=>{
+          const hidden = sp && sp.hidden_fields && sp.hidden_fields.includes(f.key);
+          return `<label style="display:flex; align-items:center; gap:5px; font-weight:400; font-size:12px;">
+            <input type="checkbox" class="permField" data-screen="${screen}" data-field="${f.key}" ${hidden?"":"checked"}> ${esc(f.label)}
+          </label>`;
+        }).join("")}
+      </div>` : "";
+    if(!actionsHTML && !fieldsHTML) return "";
+    return `<div style="border:1px solid var(--gray-200); border-radius:6px; padding:10px 12px; margin-bottom:8px;">
+      <div style="font-size:12.5px; font-weight:700; margin-bottom:8px;">${esc(SCREEN_LABELS[screen]||screen)}</div>
+      ${actionsHTML}${fieldsHTML}
+    </div>`;
+  }).join("");
+}
+
+function openUserModal(existing){
+  const isEdit=!!existing;
+  const modal=$("#modalUser");
+  const currentScreens = isEdit ? allowedScreens(existing) : ALL_SCREENS.slice();
+  const currentCats = isEdit ? allowedCategoryIds(existing) : [];
+  modal.innerHTML=`
+  <div class="modal-header"><h2>${isEdit?"تعديل صلاحيات — "+esc(existing.full_name):"مستخدم جديد"}</h2><span class="x" data-close="overlayUser">✕</span></div>
+  <div class="modal-body">
+    <div class="grid-2">
+      <div class="field"><label>الاسم الكامل</label><input type="text" id="uName" value="${esc(existing?.full_name||"")}"></div>
+      <div class="field"><label>اسم المستخدم</label><input type="text" id="uUsername" value="${esc(existing?.username||"")}" ${isEdit?"disabled":""}></div>
+      <div class="field"><label>الجوال</label><input type="text" id="uPhone" value="${esc(existing?.phone||"")}"></div>
+      <div class="field"><label>الدور</label><select id="uRole">${ST.roles.map(r=>`<option value="${r.id}" ${existing?.role_id===r.id?"selected":""}>${esc(r.name_role)}</option>`).join("")}</select></div>
+    </div>
+    ${!isEdit?`<div class="field"><label>كلمة المرور (تجريبية)</label><input type="text" id="uPassword" placeholder="لأغراض المعاينة فقط"></div>`:""}
+
+    <div class="field">
+      <label>الشاشات المسموح للمستخدم الوصول إليها</label>
+      <div style="display:grid; grid-template-columns:1fr 1fr; gap:4px 10px; border:1px solid var(--gray-200); border-radius:6px; padding:10px 12px;">
+        ${ALL_SCREENS.map(s=>`<label style="display:flex; align-items:center; gap:6px; font-weight:400; font-size:12.5px; margin-bottom:2px;">
+          <input type="checkbox" class="uScreen" value="${s}" ${currentScreens.includes(s)?"checked":""}> ${esc(SCREEN_LABELS[s])}
+        </label>`).join("")}
+      </div>
+    </div>
+
+    <div class="field">
+      <label>فئات العملاء المسموح للمستخدم برؤيتها (بدون تحديد = كل الفئات)</label>
+      <div style="display:flex; flex-direction:column; gap:4px; border:1px solid var(--gray-200); border-radius:6px; padding:10px 12px;">
+        ${ST.customerCategories.map(cc=>`<label style="display:flex; align-items:center; gap:6px; font-weight:400; font-size:12.5px;">
+          <input type="checkbox" class="uCategory" value="${cc.id}" ${currentCats.includes(cc.id)?"checked":""}>
+          <span class="cat-dot" style="background:${cc.color}"></span> ${esc(cc.category_name)}
+        </label>`).join("")}
+      </div>
+    </div>
+    <div style="font-size:11px; color:var(--gray-500); margin-bottom:14px;">ملاحظة: مسؤول التحصيل يرى فقط عملاءه المُعيَّن عليهم + ضمن الفئات المحددة هنا (كلا الشرطين معاً).</div>
+
+    <div class="field">
+      <label>صلاحيات تفصيلية داخل كل شاشة (إجراءات مسموحة + أعمدة ظاهرة)</label>
+      <div id="permSections">${permissionSectionHTML(existing)}</div>
+    </div>
+  </div>
+  <div class="modal-footer">
+    <button class="btn btn-outline" data-close="overlayUser">إلغاء</button>
+    <button class="btn btn-primary" id="saveUserBtn">حفظ</button>
+  </div>`;
+  $("#overlayUser").classList.add("show");
+  $$('[data-close="overlayUser"]').forEach(el=>el.addEventListener("click",()=>$("#overlayUser").classList.remove("show")));
+  const roleSel=$("#uRole");
+  if(roleSel) roleSel.addEventListener("change",()=>{ $("#permSections").innerHTML=permissionSectionHTML(existing); });
+  $("#saveUserBtn").addEventListener("click",()=>{
+    const full_name=$("#uName").value.trim();
+    if(!full_name){ showToast("الاسم مطلوب",true); return; }
+    const selectedScreens=[...$$(".uScreen")].filter(cb=>cb.checked).map(cb=>cb.value);
+    const selectedCats=[...$$(".uCategory")].filter(cb=>cb.checked).map(cb=>cb.value);
+    const screenPerms={};
+    [...$$(".permAction")].forEach(cb=>{
+      const s=cb.dataset.screen, a=cb.dataset.action;
+      screenPerms[s]=screenPerms[s]||{actions:{},hidden_fields:[]};
+      screenPerms[s].actions[a]=cb.checked;
+    });
+    [...$$(".permField")].forEach(cb=>{
+      const s=cb.dataset.screen, f=cb.dataset.field;
+      screenPerms[s]=screenPerms[s]||{actions:{},hidden_fields:[]};
+      if(!cb.checked) screenPerms[s].hidden_fields.push(f);
+    });
+    if(isEdit){
+      const old={allowed_screens:existing.allowed_screens, allowed_category_ids:existing.allowed_category_ids, role_id:existing.role_id, phone:existing.phone, full_name:existing.full_name, screen_permissions:existing.screen_permissions};
+      Object.assign(existing,{full_name, phone:$("#uPhone").value.trim(), role_id:$("#uRole").value, allowed_screens:selectedScreens, allowed_category_ids:selectedCats, screen_permissions:screenPerms});
+      logActivity("update","users",existing.id,old,{allowed_screens:selectedScreens, allowed_category_ids:selectedCats, role_id:existing.role_id, screen_permissions:screenPerms});
+    }else{
+      const username=$("#uUsername").value.trim();
+      if(!username){ showToast("اسم المستخدم مطلوب",true); return; }
+      if(ST.users.some(u=>u.username===username)){ showToast("اسم المستخدم مستخدم مسبقاً",true); return; }
+      const nu={id:uid(),full_name,username,password:$("#uPassword").value.trim()||"changeme123",phone:$("#uPhone").value.trim(),role_id:$("#uRole").value,status:"نشط",allowed_screens:selectedScreens,allowed_category_ids:selectedCats,screen_permissions:screenPerms};
+      ST.users.push(nu);
+      logActivity("create","users",nu.id,null,nu);
+    }
+    saveState(); $("#overlayUser").classList.remove("show"); showToast("تم الحفظ"); render();
+  });
+}
+
+function openCategoryModal(){
+  const modal=$("#modalCategory");
+  modal.innerHTML=`
+  <div class="modal-header"><h2>فئة عملاء جديدة</h2><span class="x" data-close="overlayCategory">✕</span></div>
+  <div class="modal-body">
+    <div class="field"><label>اسم الفئة</label><input type="text" id="catName"></div>
+    <div class="field"><label>اللون</label><input type="color" id="catColor" value="#2563EB" style="height:38px;"></div>
+    <div class="field"><label>نسبة الحافز %</label><input type="text" inputmode="decimal" id="catRate" placeholder="مثال: 2.5"></div>
+  </div>
+  <div class="modal-footer">
+    <button class="btn btn-outline" data-close="overlayCategory">إلغاء</button>
+    <button class="btn btn-primary" id="saveCatBtn">حفظ</button>
+  </div>`;
+  $("#overlayCategory").classList.add("show");
+  $$('[data-close="overlayCategory"]').forEach(el=>el.addEventListener("click",()=>$("#overlayCategory").classList.remove("show")));
+  $("#saveCatBtn").addEventListener("click",()=>{
+    const name=$("#catName").value.trim();
+    if(!name){ showToast("اسم الفئة مطلوب",true); return; }
+    const nc={id:uid(),category_name:name,color:$("#catColor").value,incentive_rate:parseFloat($("#catRate").value)||0,is_active:true};
+    ST.customerCategories.push(nc);
+    logActivity("create","customer_categories",nc.id,null,nc);
+    saveState(); $("#overlayCategory").classList.remove("show"); showToast("تم إضافة الفئة"); render();
+  });
+}
+
+/* ============================================================================
+   البدء
+   ============================================================================ */
+loadState();
+</script>
+</body>
+</html>
