@@ -90,20 +90,16 @@ supabase secrets set SUPABASE_SERVICE_ROLE_KEY=...   # Edge Function فقط
 يُحلّ مرة واحدة يدوياً:
 
 1. **Authentication → Users → Add User**
-   - البريد: `ayman@dr-ayman.local` (نفس النطاق أعلاه)
-   - كلمة مرور قوية، وفعّل **Auto Confirm User**.
-2. من SQL Editor:
+   - البريد: `ayman@dr-ayman.local` — النطاق يجب أن يطابق `internal_email_domain`
+     في `settings` و`VITE_INTERNAL_EMAIL_DOMAIN` في `app/.env.local`.
+   - كلمة مرور قوية (8 خانات فأكثر)، وفعّل **Auto Confirm User**.
 
-```sql
-update public.users set
-  full_name       = 'د. أيمن نجيب',
-  username        = 'ayman',
-  role_id         = (select id from public.roles where name_role = 'مدير النظام'),
-  status          = 'نشط',
-  allowed_screens = array['dashboard','followups','customers','notifications',
-                          'collections','import','performance','users']
-where id = '<UUID الحساب من الخطوة 1>';
-```
+   الموظفون لا يملكون بريداً حقيقياً؛ هذا معرّف داخلي فقط، وعند الدخول يكتب
+   الموظف اسم المستخدم وحده والتطبيق يضيف النطاق.
+
+2. عدّل الاسم والبريد في أعلى **`supabase/bootstrap_admin.sql`** وشغّله في
+   SQL Editor. السكربت يتحقق من وجود الحساب وتأكيده ومن تطابق النطاق قبل
+   الترقية، ويطبع جدول تحقق في النهاية.
 
 بعدها يُنشأ باقي المستخدمين من داخل التطبيق (شاشة المستخدمون) — لا حاجة لأي SQL.
 
