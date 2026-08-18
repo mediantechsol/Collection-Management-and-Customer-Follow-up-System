@@ -163,7 +163,7 @@ export function PerformanceScreen() {
               ))}
               {categories.length === 0 && (
                 <tr>
-                  <td colSpan={5} className="empty-state">
+                  <td colSpan={canManageCategories ? 5 : 4} className="empty-state">
                     لا توجد فئات بعد
                   </td>
                 </tr>
@@ -211,7 +211,7 @@ export function PerformanceScreen() {
               ))}
               {employees.length === 0 && (
                 <tr>
-                  <td colSpan={6} className="empty-state">
+                  <td colSpan={canPay ? 6 : 5} className="empty-state">
                     لا يوجد موظفو تحصيل بعد
                   </td>
                 </tr>

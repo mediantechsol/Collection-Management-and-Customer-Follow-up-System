@@ -963,6 +963,16 @@ declare
   v_s        public.settings%rowtype;
   v_inserted integer := 0;
 begin
+  -- ⚠️ الدالة security definer وممنوحة لـ authenticated، وجدول notifications
+  -- بلا سياسة insert عمداً. بدون هذا الفحص كان أي مستخدم مسجّل دخول — بل حتى
+  -- الموقوف — يستطيع استدعاءها والكتابة في الجدول، وهو بالضبط ما تمنعه السياسة.
+  -- التشغيل الآلي عبر pg_cron يمر بـ auth.uid() فارغة فيُستثنى صراحة.
+  if auth.uid() is not null
+     and not (public.is_active_user() and (public.is_admin() or public.is_accountant()))
+  then
+    raise exception 'غير مصرّح: توليد التنبيهات مقتصر على مدير النظام والمحاسب';
+  end if;
+
   select * into v_s from public.settings limit 1;
 
   with due as (

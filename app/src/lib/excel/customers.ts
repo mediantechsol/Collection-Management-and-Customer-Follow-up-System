@@ -138,6 +138,17 @@ interface FollowupSheetRow {
   note_2: string | null;
 }
 
+/**
+ * المهلة أيام صحيحة موجبة.
+ * ⚠️ الأعمدة في قاعدة البيانات integer، والـ RPC تحوّل بـ (…)::int — فخلية
+ * واحدة فيها 2.5 كانت تُفشل ملف الاستيراد كاملاً برسالة Postgres مبهمة.
+ * التقريب هنا يجعل الملف الحقيقي يمر، والقيم السالبة تُصفَّر لأنها لا تعني شيئاً.
+ */
+function graceDays(value: unknown): number {
+  const n = Math.round(cellNumber(value));
+  return Number.isFinite(n) && n > 0 ? n : 0;
+}
+
 export function parseFollowupSheet(rows: Grid): { rows: FollowupSheetRow[]; warnings: string[] } {
   const warnings: string[] = [];
   const out: FollowupSheetRow[] = [];
@@ -206,9 +217,9 @@ export function parseFollowupSheet(rows: Grid): { rows: FollowupSheetRow[]; warn
       customer_name,
       assigned_name: idx.assigned >= 0 ? cellText(row![idx.assigned]) : null,
       due_date: idx.dueDate >= 0 ? cellDate(row![idx.dueDate]) : null,
-      grace_1: graceStart >= 0 ? cellNumber(row![graceStart]) : 0,
-      grace_2: graceStart >= 0 ? cellNumber(row![graceStart + 1]) : 0,
-      grace_3: graceStart >= 0 ? cellNumber(row![graceStart + 2]) : 0,
+      grace_1: graceStart >= 0 ? graceDays(row![graceStart]) : 0,
+      grace_2: graceStart >= 0 ? graceDays(row![graceStart + 1]) : 0,
+      grace_3: graceStart >= 0 ? graceDays(row![graceStart + 2]) : 0,
       note_1: noteCols[0] !== undefined ? cellText(row![noteCols[0]]) : null,
       note_2: noteCols[1] !== undefined ? cellText(row![noteCols[1]]) : null,
     });

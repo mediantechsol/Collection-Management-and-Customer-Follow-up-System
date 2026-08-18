@@ -155,6 +155,9 @@ export function parseBalancesSheet(rows: Grid): ParseResult {
     let sectionSource: ParseResult['sections'][number]['source'] =
       titleCurrency ? 'عنوان القسم' : 'ترتيب الأقسام';
     let notesDecided = false;
+    // العملة المعتمدة فعلياً للقسم — تُصحَّح إن حسم عمود الملاحظات الأمر،
+    // وإلا عرضت المعاينة عملة عنوان القسم بينما استُوردت الصفوف بعملة أخرى.
+    let effectiveCurrency = sectionCurrency;
 
     for (let r = headerIdx + 1; r < endRow; r++) {
       const row = rows[r];
@@ -180,6 +183,7 @@ export function parseBalancesSheet(rows: Grid): ParseResult {
 
       if (rowCurrency && !notesDecided) {
         sectionSource = 'ملاحظات';
+        effectiveCurrency = rowCurrency;
         notesDecided = true;
         if (titleCurrency && rowCurrency !== titleCurrency) {
           warnings.push(
@@ -193,7 +197,7 @@ export function parseBalancesSheet(rows: Grid): ParseResult {
       counts[currency]++;
     }
 
-    sections.push({ headerRow: headerIdx + 1, currency: sectionCurrency, source: sectionSource });
+    sections.push({ headerRow: headerIdx + 1, currency: effectiveCurrency, source: sectionSource });
   });
 
   if (parsed.length === 0 && errors.length === 0) {

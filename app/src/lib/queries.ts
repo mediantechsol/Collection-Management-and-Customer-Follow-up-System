@@ -545,6 +545,22 @@ export function useSaveUserPermissions() {
 }
 
 /**
+ * يستخرج رسالة الخطأ العربية من جسم رد الـ Edge Function.
+ * error.context هو كائن Response لم يُقرأ بعد؛ يُرجع null إن تعذّر تحليله.
+ */
+async function readFunctionError(error: unknown): Promise<string | null> {
+  const ctx = (error as { context?: unknown })?.context;
+  if (!(ctx instanceof Response)) return null;
+  try {
+    const body = await ctx.clone().json();
+    const msg = (body as { error?: unknown })?.error;
+    return typeof msg === 'string' && msg ? msg : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * العمليات التي تحتاج service_role — تمر عبر Edge Function حصراً.
  * لا يوجد أي مسار في الواجهة يستطيع إنشاء حساب أو تغيير كلمة مرور مباشرة.
  */
@@ -563,7 +579,11 @@ export function useAdminUserAction() {
               '(يلزم نشر Edge Function باسم admin-users على المشروع)',
           );
         }
-        throw new Error(m);
+        // FunctionsHttpError: رسالة error.message هنا ثابتة وعديمة الفائدة
+        // ("Edge Function returned a non-2xx status code")، والسبب الحقيقي
+        // في جسم الرد داخل error.context. بدون قراءته كان المدير يرى نصاً
+        // إنجليزياً واحداً مهما كان الخطأ (اسم مستخدم مكرّر، كلمة مرور قصيرة…).
+        throw new Error((await readFunctionError(error)) ?? m);
       }
       if (data?.error) throw new Error(data.error as string);
       return data;

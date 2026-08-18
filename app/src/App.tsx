@@ -36,7 +36,14 @@ export default function App() {
 
   if (!profile) return <LoginScreen />;
 
-  const home = `/${defaultScreen(profile)}`;
+  const first = defaultScreen(profile);
+
+  // مستخدم نشط بلا أي شاشة مسموحة: كان هذا ينتج إعادة توجيه لا نهائية
+  // (وجهة افتراضية "dashboard" يرفضها الحارس فيعيد التوجيه إليها ثانية).
+  // الحساب الجديد يُنشأ هكذا افتراضاً، فالرسالة الصريحة هي السلوك الصحيح.
+  if (!first) return <NoScreensScreen />;
+
+  const home = `/${first}`;
 
   return (
     <Routes>
@@ -79,5 +86,21 @@ export default function App() {
         <Route path="*" element={<Navigate to={home} replace />} />
       </Route>
     </Routes>
+  );
+}
+
+function NoScreensScreen() {
+  const { signOut } = useAuth();
+  return (
+    <div className="flex min-h-screen flex-col items-center justify-center gap-3 bg-gray-50 p-6 text-center">
+      <h1 className="text-base font-bold">لا توجد شاشات مسموحة لحسابك</h1>
+      <p className="max-w-sm text-[13px] text-gray-500">
+        حسابك مفعّل لكن لم تُحدَّد له أي شاشة بعد. راجع مدير النظام ليضبط صلاحياتك من شاشة
+        «المستخدمون والصلاحيات».
+      </p>
+      <button type="button" className="btn btn-outline" onClick={() => void signOut()}>
+        تسجيل الخروج
+      </button>
+    </div>
   );
 }

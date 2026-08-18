@@ -41,6 +41,13 @@ export function NotificationsScreen() {
   const [to, setTo] = useState('');
 
   const canGenerate = isAdmin(profile) || isAccountant(profile);
+  /**
+   * مرآة سياسة notifications_update: الإدارة أو صاحب التنبيه فقط.
+   * مسؤول التحصيل يرى التنبيهات الموجّهة للإدارة (user_id فارغ) عبر عملائه،
+   * وكان زر "تعليم كمنجز" يظهر له ثم يفشل دائماً برسالة "لا تملك صلاحية".
+   */
+  const canHandle = (n: AppNotification) =>
+    isAdmin(profile) || isAccountant(profile) || n.user_id === profile.id;
   const notifSettings = {
     daysBeforeDueAlert: settings?.days_before_due_alert ?? 3,
     noFollowupDaysLimit: settings?.no_followup_days_limit ?? 14,
@@ -208,7 +215,7 @@ export function NotificationsScreen() {
         loading={isLoading}
         empty="لا توجد تنبيهات ضمن هذا النطاق"
         actions={(n) =>
-          n.status !== 'تم التعامل' ? (
+          n.status !== 'تم التعامل' && canHandle(n) ? (
             <button
               type="button"
               className="btn btn-outline btn-sm"

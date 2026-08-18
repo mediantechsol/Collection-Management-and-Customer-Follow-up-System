@@ -13,7 +13,11 @@ export function RequireScreen({ screen }: { screen: ScreenKey }) {
   const profile = useProfile();
 
   if (!hasScreenAccess(profile, screen)) {
-    return <Navigate to={`/${defaultScreen(profile)}`} replace />;
+    // defaultScreen تُرجع دائماً شاشة يملكها المستخدم فعلاً، فلا يمكن أن تنشأ
+    // حلقة إعادة توجيه. حالة null (بلا أي شاشة) يعالجها App قبل الوصول هنا.
+    const fallback = defaultScreen(profile);
+    if (!fallback) return null;
+    return <Navigate to={`/${fallback}`} replace />;
   }
   return <Outlet />;
 }

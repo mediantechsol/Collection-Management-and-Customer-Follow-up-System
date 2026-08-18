@@ -44,9 +44,15 @@ export function DashboardScreen() {
     ).length;
 
     // "بدون متابعة حديثة": لا متابعة خلال المدة المحددة (أو لا متابعة إطلاقاً)
+    // daysBetween ترمي على أي صيغة تاريخ غير "YYYY-MM-DD"، وصفٌ واحد تالف
+    // كان كفيلاً بإسقاط الشاشة كلها — نتجاوز الصف بدل إسقاط اللوحة.
     const stale = customers.filter((c) => {
       if (!c.last_followup_date) return true;
-      return daysBetween(c.last_followup_date, today) > noFollowupLimit;
+      try {
+        return daysBetween(c.last_followup_date, today) > noFollowupLimit;
+      } catch {
+        return true;
+      }
     }).length;
 
     return { totalOutstanding, overdue, todayNotifs, stale, noFollowupLimit };

@@ -71,17 +71,33 @@ export const isCollector = (u: UserProfile) => u.role_name === 'مسؤول ال�
 
 /* ---------------------------------------------------------------- الشاشات */
 
+/**
+ * الشاشات المسموحة، مصفّاة من أي قيمة لا تقابل شاشة حقيقية.
+ *
+ * ⚠️ العمود allowed_screens من نوع text[] بلا قيد على قيمه، فقد يحوي مفتاحاً
+ * قديماً أو مكتوباً بخطأ. تمرير مثل هذه القيمة كوجهة تنقّل كان ينتج إعادة
+ * توجيه لا نهائية تُجمّد التطبيق بالكامل، لذلك التصفية هنا لا في مكان الاستخدام.
+ */
 export function allowedScreens(u: UserProfile): ScreenKey[] {
-  return Array.isArray(u.allowed_screens) ? u.allowed_screens : [];
+  if (!Array.isArray(u.allowed_screens)) return [];
+  return u.allowed_screens.filter((s): s is ScreenKey =>
+    (SCREENS as readonly string[]).includes(s),
+  );
 }
 
 export function hasScreenAccess(u: UserProfile, screen: ScreenKey): boolean {
   return allowedScreens(u).includes(screen);
 }
 
-/** أول شاشة متاحة — تُستخدم كوجهة افتراضية بعد الدخول أو عند رفض شاشة. */
-export function defaultScreen(u: UserProfile): ScreenKey {
-  return hasScreenAccess(u, 'dashboard') ? 'dashboard' : (allowedScreens(u)[0] ?? 'dashboard');
+/**
+ * أول شاشة متاحة — تُستخدم كوجهة افتراضية بعد الدخول أو عند رفض شاشة.
+ * تُرجع null للمستخدم الذي لا يملك أي شاشة (وهي الحالة الافتراضية لكل حساب
+ * جديد قبل أن يضبط له المدير صلاحياته). المستدعي مُلزَم بمعالجة هذه الحالة
+ * برسالة صريحة، لا بإعادة توجيه إلى شاشة مرفوضة.
+ */
+export function defaultScreen(u: UserProfile): ScreenKey | null {
+  if (hasScreenAccess(u, 'dashboard')) return 'dashboard';
+  return allowedScreens(u)[0] ?? null;
 }
 
 export function allowedCategoryIds(u: UserProfile): string[] {
