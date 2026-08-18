@@ -553,7 +553,18 @@ export function useAdminUserAction() {
   return useMutation({
     mutationFn: async (payload: Record<string, unknown>) => {
       const { data, error } = await supabase.functions.invoke('admin-users', { body: payload });
-      if (error) throw new Error(error.message);
+      if (error) {
+        // FunctionsFetchError: لم يصل الطلب أصلاً — غالباً لأن الدالة غير منشورة
+        // على المشروع. الرسالة الإنجليزية الخام لا تفيد الموظف بشيء.
+        const m = error.message ?? '';
+        if (/failed to send a request|failed to fetch|networkerror/i.test(m)) {
+          throw new Error(
+            'تعذّر الوصول إلى خدمة إدارة المستخدمين — راجع مدير النظام ' +
+              '(يلزم نشر Edge Function باسم admin-users على المشروع)',
+          );
+        }
+        throw new Error(m);
+      }
       if (data?.error) throw new Error(data.error as string);
       return data;
     },

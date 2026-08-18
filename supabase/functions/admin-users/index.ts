@@ -4,9 +4,10 @@
 // إنشاء وتعديل حسابات المصادقة. هذه العمليات تحتاج service_role key، وهو مفتاح
 // يتجاوز كل سياسات RLS — لذلك لا يوجد ولا يجوز أن يوجد في كود الواجهة إطلاقاً.
 // الواجهة تستدعي هذه الدالة بـ JWT المستخدم الحالي، والدالة:
-//   1) تتحقق أن المستدعي مسجّل دخول فعلاً (بمفتاح anon، لا service_role).
-//   2) تتحقق أن دوره "مدير النظام" وحالته "نشط" من قاعدة البيانات.
-//   3) عندها فقط تستخدم service_role لتنفيذ العملية.
+//   1) تتحقق من صحة توكن المستدعي (توقيع JWT) قبل أي شيء آخر.
+//   2) تتحقق أن دوره "مدير النظام" وحالته "نشط" من قاعدة البيانات — بقراءة
+//      مقيّدة صراحةً بمعرّف المستخدم الذي تحققنا منه، لا بما يدّعيه الطلب.
+//   3) عندها فقط تُنفَّذ العملية الإدارية.
 //
 // الموظفون لا يملكون بريداً إلكترونياً حقيقياً، فيُولَّد إيميل داخلي من اسم
 // المستخدم: <username>@<INTERNAL_EMAIL_DOMAIN>
@@ -20,13 +21,14 @@
 import { createClient } from 'jsr:@supabase/supabase-js@2';
 
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!;
-const ANON_KEY = Deno.env.get('SUPABASE_ANON_KEY')!;
-const SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+const SERVICE_ROLE_KEY =
+  Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? Deno.env.get('SUPABASE_SECRET_KEY')!;
 const EMAIL_DOMAIN = Deno.env.get('INTERNAL_EMAIL_DOMAIN') ?? 'dr-ayman.local';
 
 const CORS = {
   'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+  'Access-Control-Allow-Headers':
+    'authorization, x-client-info, apikey, content-type, x-supabase-api-version',
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
 };
 
@@ -55,16 +57,21 @@ Deno.serve(async (req) => {
     return json({ error: 'مطلوب تسجيل دخول' }, 401);
   }
 
-  // (1) التحقق من هوية المستدعي — بمفتاح anon وبالـ JWT الخاص به
-  const asCaller = createClient(SUPABASE_URL, ANON_KEY, {
-    global: { headers: { Authorization: authHeader } },
+  // العميل الإداري: يُنشأ أولاً لأنه يُستخدم للتحقق من التوكن أيضاً. تعمّدنا عدم
+  // استخدام مفتاح anon هنا: المشاريع الحديثة تستعمل مفاتيح sb_publishable_/sb_secret_
+  // وقد يكون مفتاح anon القديم معطّلاً، فيفشل التحقق بـ 401 بلا سبب ظاهر.
+  const admin = createClient(SUPABASE_URL, SERVICE_ROLE_KEY, {
+    auth: { autoRefreshToken: false, persistSession: false },
   });
 
-  const { data: userData, error: userErr } = await asCaller.auth.getUser();
+  // (1) التحقق من هوية المستدعي — بالتوكن الخاص به وحده (توقيع JWT يُتحقق منه هنا)
+  const jwt = authHeader.slice('Bearer '.length).trim();
+  const { data: userData, error: userErr } = await admin.auth.getUser(jwt);
   if (userErr || !userData?.user) return json({ error: 'جلسة غير صالحة' }, 401);
 
-  // (2) التحقق من الدور والحالة من قاعدة البيانات (لا من الـ JWT — قابل للتلاعب)
-  const { data: profile, error: profErr } = await asCaller
+  // (2) التحقق من الدور والحالة من قاعدة البيانات (لا من الـ JWT — قابل للتلاعب).
+  // القراءة تتجاوز RLS، لذلك نُقيّدها صراحةً بمعرّف المستخدم الذي تحققنا منه للتو.
+  const { data: profile, error: profErr } = await admin
     .from('users')
     .select('id, status, roles!inner(name_role)')
     .eq('id', userData.user.id)
@@ -77,11 +84,7 @@ Deno.serve(async (req) => {
     return json({ error: 'غير مصرّح: إدارة المستخدمين مقتصرة على مدير النظام' }, 403);
   }
 
-  // (3) من هنا فقط نستخدم service_role
-  const admin = createClient(SUPABASE_URL, SERVICE_ROLE_KEY, {
-    auth: { autoRefreshToken: false, persistSession: false },
-  });
-
+  // (3) اجتاز التحقق — تُنفَّذ العملية الإدارية أدناه
   let body: Record<string, unknown>;
   try {
     body = await req.json();
