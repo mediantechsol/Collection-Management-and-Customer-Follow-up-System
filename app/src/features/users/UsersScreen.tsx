@@ -5,16 +5,110 @@ import {
   useAdminUserAction,
   useCategories,
   useRoles,
+  useSaveUserPermissions,
   useUsers,
 } from '@/lib/queries';
 import { DataTable, type Column } from '@/components/ui/DataTable';
 import { Pill } from '@/components/ui/Pill';
 import { IconPlus } from '@/components/ui/Icons';
 import { errorMessage, useToast } from '@/components/ui/Toast';
+import { Modal } from '@/components/ui/Modal';
 import { UserModal } from './UserModal';
 import { ActivityLogTable } from '@/features/common/ActivityLogTable';
-import { SCREENS, SCREEN_LABELS, screenAction, visibleFields } from '@/lib/permissions';
+import {
+  SCREENS,
+  SCREEN_LABELS,
+  extractPermissionsBundle,
+  isAdmin,
+  screenAction,
+  visibleFields,
+} from '@/lib/permissions';
 import type { AppUser } from '@/types/models';
+
+/* ============================================================ مودال نسخ الصلاحيات إلى مستخدم آخر */
+
+function CopyPermissionsModal({
+  source,
+  allUsers,
+  onClose,
+}: {
+  source: AppUser;
+  allUsers: AppUser[];
+  onClose: () => void;
+}) {
+  const toast = useToast();
+  const savePermissions = useSaveUserPermissions();
+  const [targetId, setTargetId] = useState('');
+
+  const targets = allUsers.filter((u) => u.id !== source.id && u.status === 'نشط');
+
+  async function handleCopy() {
+    const target = allUsers.find((u) => u.id === targetId);
+    if (!target) return;
+
+    const bundle = extractPermissionsBundle(source);
+
+    try {
+      await savePermissions.mutateAsync({
+        id: target.id,
+        values: {
+          role_id: bundle.role_id,
+          allowed_screens: bundle.allowed_screens,
+          allowed_category_ids: bundle.allowed_category_ids,
+          screen_permissions: bundle.screen_permissions,
+        },
+      });
+      toast.show(`تم نسخ صلاحيات ${source.full_name} إلى ${target.full_name} بنجاح`);
+      onClose();
+    } catch (e) {
+      toast.error(errorMessage(e));
+    }
+  }
+
+  return (
+    <Modal
+      open
+      title={`نسخ صلاحيات ${source.full_name} إلى…`}
+      onClose={onClose}
+      footer={
+        <>
+          <button type="button" className="btn btn-outline" onClick={onClose}>
+            إلغاء
+          </button>
+          <button
+            type="button"
+            className="btn btn-primary"
+            disabled={!targetId || savePermissions.isPending}
+            onClick={() => void handleCopy()}
+          >
+            {savePermissions.isPending ? 'جارٍ النسخ…' : 'نسخ وحفظ'}
+          </button>
+        </>
+      }
+    >
+      <div className="field">
+        <label>اختر المستخدم المستهدف</label>
+        <select
+          id="copy-target-select"
+          value={targetId}
+          onChange={(e) => setTargetId(e.target.value)}
+        >
+          <option value="">اختر مستخدم…</option>
+          {targets.map((u) => (
+            <option key={u.id} value={u.id}>
+              {u.full_name} ({u.username})
+            </option>
+          ))}
+        </select>
+      </div>
+      <p className="text-[11px] text-gray-500">
+        سيتم نسخ الدور والشاشات المسموحة وفئات العملاء ومصفوفة الصلاحيات الدقيقة وحفظها فوراً.
+      </p>
+    </Modal>
+  );
+}
+
+/* ============================================================ شاشة المستخدمين */
 
 /**
  * المستخدمون والصلاحيات.
@@ -38,10 +132,13 @@ export function UsersScreen() {
     existing: null,
   });
 
+  const [copySource, setCopySource] = useState<AppUser | null>(null);
+
   const canCreate = screenAction(profile, 'users', 'create');
   const canEdit = screenAction(profile, 'users', 'edit');
   const canDeactivate = screenAction(profile, 'users', 'deactivate');
   const fields = visibleFields(profile, 'users');
+  const showCopyAction = isAdmin(profile);
 
   const roleName = (id: string) => roles.find((r) => r.id === id)?.name_role ?? '—';
 
@@ -136,7 +233,7 @@ export function UsersScreen() {
         loading={isLoading}
         empty="لا يوجد مستخدمون"
         actions={
-          canEdit || canDeactivate
+          canEdit || canDeactivate || showCopyAction
             ? (u) => (
                 <>
                   {canEdit && (
@@ -146,6 +243,15 @@ export function UsersScreen() {
                       onClick={() => setModal({ open: true, existing: u })}
                     >
                       تعديل الصلاحيات
+                    </button>
+                  )}
+                  {showCopyAction && (
+                    <button
+                      type="button"
+                      className="btn btn-outline btn-sm"
+                      onClick={() => setCopySource(u)}
+                    >
+                      نسخ الصلاحيات إلى…
                     </button>
                   )}
                   {canDeactivate && (
@@ -171,7 +277,16 @@ export function UsersScreen() {
         <UserModal
           existing={modal.existing}
           roles={roles}
+          allUsers={users}
           onClose={() => setModal({ open: false, existing: null })}
+        />
+      )}
+
+      {copySource && (
+        <CopyPermissionsModal
+          source={copySource}
+          allUsers={users}
+          onClose={() => setCopySource(null)}
         />
       )}
     </>

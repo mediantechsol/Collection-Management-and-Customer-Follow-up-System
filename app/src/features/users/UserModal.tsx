@@ -7,16 +7,20 @@ import {
   FIELD_CATALOG,
   SCREENS,
   SCREEN_LABELS,
+  extractPermissionsBundle,
+  isAdmin,
   roleDefaultAction,
   type RoleName,
   type ScreenKey,
   type ScreenPermissions,
 } from '@/lib/permissions';
+import { useProfile } from '@/features/auth/AuthContext';
 import type { AppUser, Role } from '@/types/models';
 
 interface Props {
   existing: AppUser | null;
   roles: Role[];
+  allUsers: AppUser[];
   onClose: () => void;
 }
 
@@ -30,8 +34,9 @@ interface Props {
  * المستخدم الجديد يُنشأ دائماً بحالة "موقوف" — يفعّله المدير بعد ضبط شاشاته
  * وفئاته، فلا يوجد حساب فعّال بلا صلاحيات مضبوطة ولو للحظة.
  */
-export function UserModal({ existing, roles, onClose }: Props) {
+export function UserModal({ existing, roles, allUsers, onClose }: Props) {
   const toast = useToast();
+  const profile = useProfile();
   const { data: categories = [] } = useCategories();
   const savePermissions = useSaveUserPermissions();
   const adminAction = useAdminUserAction();
@@ -53,6 +58,31 @@ export function UserModal({ existing, roles, onClose }: Props) {
   const [permissions, setPermissions] = useState<ScreenPermissions>(
     existing?.screen_permissions ?? {},
   );
+
+  /* -------------------------------------------------- نسخ الصلاحيات */
+  const [copySourceId, setCopySourceId] = useState('');
+
+  /** المستخدمون المتاحون كمصدر نسخ: نشطون وليسوا المستخدم الجاري تعديله. */
+  const copySourceCandidates = allUsers.filter(
+    (u) => u.status === 'نشط' && u.id !== existing?.id,
+  );
+
+  function applyCopyPermissions() {
+    const source = allUsers.find((u) => u.id === copySourceId);
+    if (!source) return;
+
+    const bundle = extractPermissionsBundle(source);
+
+    setForm((f) => ({ ...f, role_id: bundle.role_id }));
+    setScreens(bundle.allowed_screens);
+    setCategoryIds(bundle.allowed_category_ids);
+    setPermissions(bundle.screen_permissions);
+    setCopySourceId('');
+
+    toast.show(`تم نسخ صلاحيات ${source.full_name} بنجاح`);
+  }
+
+  /* -------------------------------------------------- */
 
   const roleName = (roles.find((r) => r.id === form.role_id)?.name_role ?? 'مستخدم مخصص') as RoleName;
 
@@ -235,6 +265,44 @@ export function UserModal({ existing, roles, onClose }: Props) {
           placeholder="8 خانات على الأقل"
         />
       </div>
+
+      {/* -------------------------------------------------- نسخ الصلاحيات */}
+      {isAdmin(profile) && copySourceCandidates.length > 0 && (
+        <div className="mt-4 rounded-lg border border-blue-200 bg-blue-50 px-4 py-3">
+          <div className="mb-2 text-[13px] font-bold text-blue-800">
+            ⚡ نسخ الصلاحيات من مستخدم آخر
+          </div>
+          <div className="flex items-end gap-2">
+            <div className="field mb-0 flex-1">
+              <select
+                id="copy-source-select"
+                value={copySourceId}
+                onChange={(e) => setCopySourceId(e.target.value)}
+                className="w-full"
+              >
+                <option value="">اختر مستخدم…</option>
+                {copySourceCandidates.map((u) => (
+                  <option key={u.id} value={u.id}>
+                    {u.full_name} ({u.username})
+                  </option>
+                ))}
+              </select>
+            </div>
+            <button
+              type="button"
+              id="copy-permissions-btn"
+              className="btn btn-primary btn-sm whitespace-nowrap"
+              disabled={!copySourceId}
+              onClick={applyCopyPermissions}
+            >
+              ⚡ نسخ
+            </button>
+          </div>
+          <p className="mt-1.5 text-[11px] text-blue-600">
+            سيتم نسخ الدور والشاشات والفئات ومصفوفة الصلاحيات الدقيقة. لن تتأثر بيانات المستخدم الشخصية.
+          </p>
+        </div>
+      )}
 
       {/* -------------------------------------------------- الشاشات */}
       <h3 className="mb-2 mt-4 border-t border-gray-100 pt-3.5 text-[13px] font-bold">

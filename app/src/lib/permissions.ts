@@ -217,6 +217,34 @@ export function visibleFields(u: UserProfile, screen: ScreenKey): CatalogEntry[]
   return (FIELD_CATALOG[screen] ?? []).filter((f) => !isFieldHidden(u, screen, f.key));
 }
 
+/* ---------------------------------------------------------------- نسخ الصلاحيات */
+
+/** حزمة الصلاحيات القابلة للنسخ بين المستخدمين — بدون بيانات الاعتماد الشخصية. */
+export interface PermissionsBundle {
+  role_id: string;
+  allowed_screens: ScreenKey[];
+  allowed_category_ids: string[];
+  screen_permissions: ScreenPermissions;
+}
+
+/**
+ * استخلاص حزمة الصلاحيات من مستخدم — نسخة عميقة لتجنب مشاركة المراجع.
+ * لا تتضمن الحزمة أي بيانات شخصية (اسم، هاتف، كلمة مرور).
+ */
+export function extractPermissionsBundle(user: {
+  role_id: string;
+  allowed_screens: ScreenKey[];
+  allowed_category_ids: string[];
+  screen_permissions: ScreenPermissions;
+}): PermissionsBundle {
+  return {
+    role_id: user.role_id,
+    allowed_screens: [...user.allowed_screens],
+    allowed_category_ids: [...user.allowed_category_ids],
+    screen_permissions: structuredClone(user.screen_permissions),
+  };
+}
+
 /* ---------------------------------------------------------------- العملاء */
 
 export interface CustomerScope {
