@@ -114,3 +114,10 @@ describe('extractPermissionsBundle', () => {
   });
 });
 
+describe('settings permissions', () => {
+  it('تتضمن قائمة الشاشات شاشة الإعدادات', () => {
+    expect(allowedScreens(user(['settings']))).toEqual(['settings']);
+  });
+});
+
+

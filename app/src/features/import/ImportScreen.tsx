@@ -5,6 +5,7 @@ import { Pill } from '@/components/ui/Pill';
 import { errorMessage, useToast } from '@/components/ui/Toast';
 import { IconUpload } from '@/components/ui/Icons';
 import {
+  useCategories,
   useExcelImports,
   useImportBalances,
   useImportCustomers,
@@ -13,7 +14,7 @@ import {
 } from '@/lib/queries';
 import { parseBalancesSheet, type ParseResult } from '@/lib/excel/balances';
 import { parseCustomersWorkbook, type CustomersParseResult } from '@/lib/excel/customers';
-import { normalizeArabic } from '@/lib/excel/normalize';
+import { matchNormalized, normalizeArabic } from '@/lib/excel/normalize';
 import { fmt } from '@/lib/logic/money';
 
 type Mode = 'balances' | 'customers';
@@ -261,6 +262,7 @@ function CustomersImport() {
   const toast = useToast();
   const importCustomers = useImportCustomers();
   const { data: directory = [] } = useUserDirectory();
+  const { data: existingCategories = [] } = useCategories();
   const [preview, setPreview] = useState<{ result: CustomersParseResult; fileName: string } | null>(
     null,
   );
@@ -297,9 +299,15 @@ function CustomersImport() {
         fileName: preview.fileName,
         rows: preview.result.rows,
       });
-      toast.show(
-        `تم استيراد ${res.rows} عميل • جدد: ${res.new_customers} • تواريخ استحقاق: ${res.due_dates}`,
-      );
+      const parts = [
+        `تم استيراد ${res.rows} عميل`,
+        `جدد: ${res.new_customers}`,
+        `تواريخ استحقاق: ${res.due_dates}`,
+      ];
+      if (res.new_categories) {
+        parts.push(`فئات جديدة: ${res.new_categories}`);
+      }
+      toast.show(parts.join(' • '));
       if (res.unmatched_assignees?.length) {
         toast.error(`مسؤولون لم يُطابَقوا: ${res.unmatched_assignees.join('، ')}`);
       }
@@ -308,8 +316,6 @@ function CustomersImport() {
       toast.error(errorMessage(e));
     }
   }
-
-  const knownNames = new Set(directory.flatMap((u) => [u.full_name, u.username]));
 
   return (
     <>
@@ -320,10 +326,10 @@ function CustomersImport() {
         </p>
         <ul className="list-inside list-disc space-y-1 text-xs text-gray-600">
           <li>
-            <b>بيانات العملاء</b>: رقم العميل، الاسم، الجوال 1 و2، الضامن/الضمانة، الحالة.
+            <b>بيانات العملاء</b>: رقم العميل، الاسم، الجوال 1 و2، الضامن/الضمانة، الحالة، فئة العميل، المسؤول.
           </li>
           <li>
-            <b>متابعة العملاء</b>: تاريخ الاستحقاق، المهل الثلاث، مسؤول متابعة التحصيل، الملاحظات.
+            <b>متابعة العملاء</b>: تاريخ الاستحقاق، المهل الثلاث، مسؤول متابعة التحصيل، الفئة، الملاحظات.
           </li>
           <li>
             يُدمج الشيتان على رقم العميل بعد تطبيعه، لأن الأول يكتبه «00001» والثاني يكتبه 1.
@@ -394,17 +400,40 @@ function CustomersImport() {
             <span>من شيت المتابعة: <b>{preview.result.stats.fromFollowups}</b></span>
             <span>مدموجون: <b>{preview.result.stats.merged}</b></span>
             <span>بتاريخ استحقاق: <b>{preview.result.stats.withDueDate}</b></span>
+            <span>بفئة: <b>{preview.result.stats.withCategory}</b></span>
+            <span>بمسؤول: <b>{preview.result.stats.withCollector}</b></span>
           </div>
+
+          {preview.result.categories.length > 0 && (
+            <div className="mb-3 rounded-md bg-gray-50 p-3 text-xs">
+              <p className="mb-1.5 font-semibold">فئات العملاء المكتشفة في الملف:</p>
+              <div className="flex flex-wrap gap-1.5">
+                {preview.result.categories.map((cat) => {
+                  const matched = matchNormalized(cat, existingCategories, (c) => c.category_name);
+                  return (
+                    <Pill key={cat} tone={matched ? 'green' : 'amber'}>
+                      {cat} {matched ? '✓' : '— فئة جديدة (ستُنشأ تلقائياً)'}
+                    </Pill>
+                  );
+                })}
+              </div>
+            </div>
+          )}
 
           {preview.result.assignees.length > 0 && (
             <div className="mb-3 rounded-md bg-gray-50 p-3 text-xs">
               <p className="mb-1.5 font-semibold">مسؤولو التحصيل في الملف:</p>
               <div className="flex flex-wrap gap-1.5">
-                {preview.result.assignees.map((a) => (
-                  <Pill key={a} tone={knownNames.has(a) ? 'green' : 'amber'}>
-                    {a} {knownNames.has(a) ? '✓' : '— لا يوجد مستخدم بهذا الاسم'}
-                  </Pill>
-                ))}
+                {preview.result.assignees.map((a) => {
+                  const matched =
+                    matchNormalized(a, directory, (u) => u.full_name) ||
+                    matchNormalized(a, directory, (u) => u.username);
+                  return (
+                    <Pill key={a} tone={matched ? 'green' : 'amber'}>
+                      {a} {matched ? `✓ (${matched.full_name})` : '— لا يوجد مستخدم بهذا الاسم'}
+                    </Pill>
+                  );
+                })}
               </div>
               <p className="mt-2 text-gray-500">
                 الأسماء غير المطابقة لن تُربط بأي مستخدم. أنشئ لهم حسابات بنفس الاسم الكامل من شاشة
@@ -419,6 +448,7 @@ function CustomersImport() {
                 <tr>
                   <th>رقم العميل</th>
                   <th>الاسم</th>
+                  <th>الفئة</th>
                   <th>المسؤول</th>
                   <th>الاستحقاق</th>
                   <th>المهل</th>
@@ -429,6 +459,7 @@ function CustomersImport() {
                   <tr key={r.customer_number}>
                     <td className="mono">{r.customer_number}</td>
                     <td>{r.customer_name}</td>
+                    <td>{r.category_name ?? '—'}</td>
                     <td>{r.assigned_name ?? '—'}</td>
                     <td className="mono">{r.due_date ?? '—'}</td>
                     <td className="mono">

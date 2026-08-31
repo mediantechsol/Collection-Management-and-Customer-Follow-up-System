@@ -35,6 +35,7 @@ export interface CustomerImportRow {
   guarantor: string | null;
   status_customer: string | null;
   assigned_name: string | null;
+  category_name: string | null;
   due_date: string | null;
   grace_1: number;
   grace_2: number;
@@ -50,7 +51,16 @@ export interface CustomersParseResult {
   rows: CustomerImportRow[];
   /** أسماء المسؤولين كما وردت في الملف — تُعرض للمطابقة مع المستخدمين. */
   assignees: string[];
-  stats: { fromProfiles: number; fromFollowups: number; merged: number; withDueDate: number };
+  /** أسماء الفئات كما وردت في الملف — تُعرض للمطابقة مع الفئات المسجّلة. */
+  categories: string[];
+  stats: {
+    fromProfiles: number;
+    fromFollowups: number;
+    merged: number;
+    withDueDate: number;
+    withCategory: number;
+    withCollector: number;
+  };
 }
 
 type Grid = unknown[][];
@@ -65,6 +75,22 @@ const has = (part: string) => (h: string) => h.includes(normalizeArabic(part));
 
 /* ---------------------------------------------------------------- شيت بيانات العملاء */
 
+/** يتعرف على عمود الفئة بأي صيغة متوقعة. */
+const isCategory = (h: string) =>
+  has('فئه العميل')(h) || eq('الفئه')(h) || has('فئات العملاء')(h) || eq('التصنيف')(h);
+
+/** يتعرف على عمود مسؤول التحصيل بأي صيغة متوقعة. */
+const isCollector = (h: string) =>
+  eq('المسئول')(h) ||
+  eq('المسؤول')(h) ||
+  has('مسؤول المتابعه')(h) ||
+  has('مسئول المتابعه')(h) ||
+  has('مسؤول التحصيل')(h) ||
+  has('مسئول التحصيل')(h) ||
+  has('مسئول متابعه التحصيل')(h) ||
+  has('مسؤول متابعه التحصيل')(h) ||
+  eq('المحصل')(h);
+
 interface ProfileRow {
   customer_number: string;
   customer_name: string;
@@ -72,6 +98,8 @@ interface ProfileRow {
   mobile_2: string | null;
   guarantor: string | null;
   status_customer: string | null;
+  assigned_name: string | null;
+  category_name: string | null;
 }
 
 export function parseProfilesSheet(rows: Grid): { rows: ProfileRow[]; warnings: string[] } {
@@ -101,6 +129,8 @@ export function parseProfilesSheet(rows: Grid): { rows: ProfileRow[]; warnings: 
     mobile2: findCol(header, has('جوال 2')),
     guarantor: findCol(header, has('ضامن')),
     status: findCol(header, eq('الحالة')),
+    category: findCol(header, isCategory),
+    collector: findCol(header, isCollector),
   };
 
   for (let r = headerIdx + 1; r < rows.length; r++) {
@@ -118,6 +148,8 @@ export function parseProfilesSheet(rows: Grid): { rows: ProfileRow[]; warnings: 
       mobile_2: idx.mobile2 >= 0 ? cellPhone(row![idx.mobile2]) : null,
       guarantor: idx.guarantor >= 0 ? cellText(row![idx.guarantor]) : null,
       status_customer: idx.status >= 0 ? cellText(row![idx.status]) : null,
+      assigned_name: idx.collector >= 0 ? cellText(row![idx.collector]) : null,
+      category_name: idx.category >= 0 ? cellText(row![idx.category]) : null,
     });
   }
 
@@ -130,6 +162,7 @@ interface FollowupSheetRow {
   customer_number: string;
   customer_name: string | null;
   assigned_name: string | null;
+  category_name: string | null;
   due_date: string | null;
   grace_1: number;
   grace_2: number;
@@ -174,9 +207,10 @@ export function parseFollowupSheet(rows: Grid): { rows: FollowupSheetRow[]; warn
     number: findCol(header, eq('رقم العميل')),
     // الشيت يسميه "اسم الزبون" لا "اسم العميل"
     name: findCol(header, (h) => has('اسم الزبون')(h) || has('اسم العميل')(h)),
-    // "مسئول متابعة التحصيل" — الهمزة تُكتب بأشكال مختلفة، فنطابق على "التحصيل"
-    assigned: findCol(header, has('التحصيل')),
+    // "مسئول متابعة التحصيل" — الهمزة تُكتب بأشكال مختلفة، فنطابق بجميع الصيغ
+    assigned: findCol(header, (h) => isCollector(h) || has('التحصيل')(h)),
     dueDate: findCol(header, eq('تاريخ الاستحقاق')),
+    category: findCol(header, isCategory),
   };
 
   // أعمدة المهل الثلاث: تحت رأس المجموعة "مهلة إضافية بعد التواصل (يوم)"
@@ -216,6 +250,7 @@ export function parseFollowupSheet(rows: Grid): { rows: FollowupSheetRow[]; warn
       customer_number,
       customer_name,
       assigned_name: idx.assigned >= 0 ? cellText(row![idx.assigned]) : null,
+      category_name: idx.category >= 0 ? cellText(row![idx.category]) : null,
       due_date: idx.dueDate >= 0 ? cellDate(row![idx.dueDate]) : null,
       grace_1: graceStart >= 0 ? graceDays(row![graceStart]) : 0,
       grace_2: graceStart >= 0 ? graceDays(row![graceStart + 1]) : 0,
@@ -246,7 +281,8 @@ export function parseCustomersWorkbook(input: {
   for (const p of profileResult.rows) {
     merged.set(p.customer_number, {
       ...p,
-      assigned_name: null,
+      assigned_name: p.assigned_name ?? null,
+      category_name: p.category_name ?? null,
       due_date: null,
       grace_1: 0,
       grace_2: 0,
@@ -262,6 +298,7 @@ export function parseCustomersWorkbook(input: {
     if (existing) {
       mergedCount++;
       existing.assigned_name = f.assigned_name ?? existing.assigned_name;
+      existing.category_name = f.category_name ?? existing.category_name;
       existing.due_date = f.due_date ?? existing.due_date;
       existing.grace_1 = f.grace_1;
       existing.grace_2 = f.grace_2;
@@ -280,6 +317,7 @@ export function parseCustomersWorkbook(input: {
       guarantor: null,
       status_customer: null,
       assigned_name: f.assigned_name,
+      category_name: f.category_name,
       due_date: f.due_date,
       grace_1: f.grace_1,
       grace_2: f.grace_2,
@@ -297,7 +335,10 @@ export function parseCustomersWorkbook(input: {
   }
 
   const assignees = [...new Set(rows.map((r) => r.assigned_name).filter((a): a is string => !!a))].sort();
+  const categories = [...new Set(rows.map((r) => r.category_name).filter((a): a is string => !!a))].sort();
   const withDueDate = rows.filter((r) => r.due_date).length;
+  const withCategory = rows.filter((r) => r.category_name).length;
+  const withCollector = rows.filter((r) => r.assigned_name).length;
 
   if (withDueDate === 0 && rows.length > 0) {
     warnings.push('لا يوجد أي تاريخ استحقاق في الملف — لن تُنشأ سجلات استحقاق ولن تعمل التنبيهات');
@@ -309,11 +350,14 @@ export function parseCustomersWorkbook(input: {
     warnings,
     rows,
     assignees,
+    categories,
     stats: {
       fromProfiles: profileResult.rows.length,
       fromFollowups: followResult.rows.length,
       merged: mergedCount,
       withDueDate,
+      withCategory,
+      withCollector,
     },
   };
 }

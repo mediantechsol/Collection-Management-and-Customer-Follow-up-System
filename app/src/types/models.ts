@@ -127,6 +127,8 @@ export interface Followup {
   description_customer: string | null;
   level_seriousness: Seriousness | null;
   expected_collection_amount: number;
+  attachment_url?: string | null;
+  attachment_name?: string | null;
   created_at: ISODateTime;
 }
 
@@ -203,8 +205,22 @@ export interface ActivityLog {
   created_at: ISODateTime;
 }
 
+export interface CurrencyConfig {
+  code: Currency;
+  name: string;
+  symbol: string;
+  rate: number;
+  is_base: boolean;
+  is_active: boolean;
+}
+
 export interface AppSettings {
   id: boolean;
+  company_name?: string;
+  system_name?: string;
+  language?: string;
+  direction?: string;
+  date_format?: string;
   exchange_rate_usd: number;
   exchange_rate_sar: number;
   no_followup_days_limit: number;
@@ -213,6 +229,13 @@ export interface AppSettings {
   shopping_status_label: string;
   promise_keyword: string;
   internal_email_domain: string;
+  alert_due_soon_enabled?: boolean;
+  alert_due_today_enabled?: boolean;
+  alert_shopping_now_enabled?: boolean;
+  alert_promise_enabled?: boolean;
+  alert_stale_enabled?: boolean;
+  alert_escalated_enabled?: boolean;
+  currencies_config?: CurrencyConfig[];
 }
 
 /* ---------------------------------------------------------------- نتائج الـ RPC */
@@ -230,4 +253,5 @@ export interface ImportCustomersResult {
   new_customers: number;
   due_dates: number;
   unmatched_assignees: string[];
+  new_categories?: number;
 }

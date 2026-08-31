@@ -13,8 +13,16 @@ import { DataTable, type Column } from '@/components/ui/DataTable';
 import { NotificationPill, Pill } from '@/components/ui/Pill';
 import { NOTIF_ICONS } from '@/components/ui/Icons';
 import { errorMessage, useToast } from '@/components/ui/Toast';
-import { NOTIFICATION_META, NOTIFICATION_TYPES, type NotificationType } from '@/lib/logic/notifications';
+import {
+  NOTIFICATION_META,
+  NOTIFICATION_TYPES,
+  notificationReason,
+  type NotificationType,
+} from '@/lib/logic/notifications';
 import { isAccountant, isAdmin } from '@/lib/permissions';
+import { fmt } from '@/lib/logic/money';
+import { daysBetween, todayStr } from '@/lib/logic/dates';
+import { FollowupModal } from '@/features/followups/FollowupModal';
 import type { AppNotification } from '@/types/models';
 
 /**
@@ -39,6 +47,10 @@ export function NotificationsScreen() {
   const [typeFilter, setTypeFilter] = useState<NotificationType | ''>('');
   const [from, setFrom] = useState('');
   const [to, setTo] = useState('');
+  const [followupTarget, setFollowupTarget] = useState<{
+    customerId: string;
+    customerName: string;
+  } | null>(null);
 
   const canGenerate = isAdmin(profile) || isAccountant(profile);
   /**
@@ -53,7 +65,7 @@ export function NotificationsScreen() {
     noFollowupDaysLimit: settings?.no_followup_days_limit ?? 14,
   };
 
-  const customerNames = useMemo(
+  const customerMap = useMemo(
     () => new Map(customers.map((c) => [c.id, c])),
     [customers],
   );
@@ -71,6 +83,8 @@ export function NotificationsScreen() {
     [byDate, typeFilter],
   );
 
+  const today = todayStr();
+
   async function onGenerate() {
     try {
       const count = await generate.mutateAsync();
@@ -78,6 +92,25 @@ export function NotificationsScreen() {
     } catch (e) {
       toast.error(errorMessage(e));
     }
+  }
+
+  /** شارة الأيام المتبقية / المتأخرة */
+  function DaysChip({ dueDate }: { dueDate: string | null }) {
+    if (!dueDate) return <span className="text-gray-400">—</span>;
+    const diff = daysBetween(today, dueDate);
+    const cls =
+      diff < 0
+        ? 'days-chip days-chip--danger'
+        : diff <= (notifSettings.daysBeforeDueAlert ?? 3)
+          ? 'days-chip days-chip--warn'
+          : 'days-chip days-chip--ok';
+    const label =
+      diff < 0
+        ? `متأخر ${Math.abs(diff)} يوم`
+        : diff === 0
+          ? 'اليوم'
+          : `متبقي ${diff} يوم`;
+    return <span className={cls}>{label}</span>;
   }
 
   const columns: Column<AppNotification>[] = [
@@ -89,31 +122,72 @@ export function NotificationsScreen() {
     {
       key: 'customer',
       label: 'العميل',
-      render: (n) => (
-        <button
-          type="button"
-          className="font-semibold text-blue-600"
-          onClick={() => navigate(`/customers/${n.customer_id}`)}
-        >
-          {customerNames.get(n.customer_id)?.customer_name ?? '—'}
-        </button>
-      ),
+      render: (n) => {
+        const c = customerMap.get(n.customer_id);
+        return (
+          <button
+            type="button"
+            className="text-right"
+            onClick={() => navigate(`/customers/${n.customer_id}`)}
+          >
+            <span className="block font-semibold text-blue-600">
+              {c?.customer_name ?? '—'}
+            </span>
+            {c?.customer_number && (
+              <span className="block text-[11px] text-gray-500">
+                #{c.customer_number}
+              </span>
+            )}
+          </button>
+        );
+      },
       hideOnCard: true,
     },
     {
-      key: 'category',
-      label: 'فئة العميل',
-      render: (n) => customerNames.get(n.customer_id)?.category_name ?? '—',
+      key: 'due_date',
+      label: 'تاريخ الاستحقاق',
+      render: (n) => {
+        const c = customerMap.get(n.customer_id);
+        const dueDate = c?.new_due_date ?? c?.due_date ?? null;
+        return (
+          <div className="flex flex-col gap-1">
+            <span className="mono text-[12px]">{dueDate ?? '—'}</span>
+            <DaysChip dueDate={dueDate} />
+          </div>
+        );
+      },
     },
     {
-      key: 'date',
-      label: 'التاريخ',
-      render: (n) => <span className="mono">{n.notification_date}</span>,
+      key: 'amount',
+      label: 'المبلغ المتبقي',
+      align: 'end' as const,
+      render: (n) => {
+        const c = customerMap.get(n.customer_id);
+        return (
+          <span className="mono text-[13px] font-bold text-gray-900" dir="ltr">
+            {c ? fmt(c.total_due_yer) : '—'}
+            <span className="mr-1 text-[10px] font-normal text-gray-500">ر.ي</span>
+          </span>
+        );
+      },
     },
     {
-      key: 'target',
-      label: 'المستهدف',
-      render: (n) => (n.user_id ? userNames.get(n.user_id) ?? '—' : 'الإدارة'),
+      key: 'collector',
+      label: 'مسؤول المتابعة',
+      render: (n) => {
+        const c = customerMap.get(n.customer_id);
+        const assignedId = c?.assigned_user_id;
+        return assignedId ? (userNames.get(assignedId) ?? '—') : 'غير مكلّف';
+      },
+    },
+    {
+      key: 'reason',
+      label: 'سبب التنبيه',
+      render: (n) => (
+        <span className="text-[12px] text-gray-600">
+          {notificationReason(n.notification_type, notifSettings)}
+        </span>
+      ),
     },
     {
       key: 'status',
@@ -211,25 +285,56 @@ export function NotificationsScreen() {
         columns={columns}
         rows={rows}
         keyOf={(n) => n.id}
-        cardTitle={(n) => customerNames.get(n.customer_id)?.customer_name ?? '—'}
+        cardTitle={(n) => customerMap.get(n.customer_id)?.customer_name ?? '—'}
         loading={isLoading}
         empty="لا توجد تنبيهات ضمن هذا النطاق"
-        actions={(n) =>
-          n.status !== 'تم التعامل' && canHandle(n) ? (
+        actions={(n) => (
+          <div className="flex gap-1.5">
             <button
               type="button"
               className="btn btn-outline btn-sm"
-              onClick={() =>
-                void handle
-                  .mutateAsync(n.id)
-                  .catch((e) => toast.error(errorMessage(e)))
-              }
+              onClick={() => {
+                const c = customerMap.get(n.customer_id);
+                setFollowupTarget({
+                  customerId: n.customer_id,
+                  customerName: c?.customer_name ?? '—',
+                });
+              }}
             >
-              تعليم كمنجز
+              + إضافة متابعة
             </button>
-          ) : null
-        }
+            <button
+              type="button"
+              className="btn btn-outline btn-sm"
+              onClick={() => navigate(`/customers/${n.customer_id}`)}
+            >
+              تفاصيل
+            </button>
+            {n.status !== 'تم التعامل' && canHandle(n) && (
+              <button
+                type="button"
+                className="btn btn-primary btn-sm"
+                onClick={() =>
+                  void handle
+                    .mutateAsync(n.id)
+                    .catch((e) => toast.error(errorMessage(e)))
+                }
+              >
+                ✓ إنجاز
+              </button>
+            )}
+          </div>
+        )}
       />
+
+      {followupTarget && (
+        <FollowupModal
+          customerId={followupTarget.customerId}
+          customerName={followupTarget.customerName}
+          open
+          onClose={() => setFollowupTarget(null)}
+        />
+      )}
     </>
   );
 }

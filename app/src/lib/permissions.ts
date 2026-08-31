@@ -30,6 +30,7 @@ export const SCREENS = [
   'import',
   'performance',
   'users',
+  'settings',
 ] as const;
 export type ScreenKey = (typeof SCREENS)[number];
 
@@ -42,6 +43,7 @@ export const SCREEN_LABELS: Record<ScreenKey, string> = {
   import: 'استيراد Excel',
   performance: 'الأداء والحوافز',
   users: 'المستخدمون والصلاحيات',
+  settings: 'الإعدادات المركزية',
 };
 
 export interface ScreenPermission {
@@ -80,12 +82,18 @@ export const isCollector = (u: UserProfile) => u.role_name === 'مسؤول ال�
  */
 export function allowedScreens(u: UserProfile): ScreenKey[] {
   if (!Array.isArray(u.allowed_screens)) return [];
-  return u.allowed_screens.filter((s): s is ScreenKey =>
+  const list = u.allowed_screens.filter((s): s is ScreenKey =>
     (SCREENS as readonly string[]).includes(s),
   );
+  // مدير النظام يملك صلاحية شاشة الإعدادات المركزية دائماً
+  if (isAdmin(u) && !list.includes('settings')) {
+    list.push('settings');
+  }
+  return list;
 }
 
 export function hasScreenAccess(u: UserProfile, screen: ScreenKey): boolean {
+  if (screen === 'settings') return isAdmin(u);
   return allowedScreens(u).includes(screen);
 }
 
@@ -175,6 +183,9 @@ export const ACTION_CATALOG: Partial<Record<ScreenKey, CatalogEntry[]>> = {
     { key: 'create', label: 'إضافة فئة عملاء' },
     { key: 'pay', label: 'صرف حافز' },
   ],
+  settings: [
+    { key: 'edit', label: 'تعديل الإعدادات العامة والتنبيهات' },
+  ],
 };
 
 /**
@@ -194,6 +205,7 @@ export function roleDefaultAction(role: RoleName, screen: ScreenKey, action: str
   if (screen === 'collections') return role === 'المحاسب';
   if (screen === 'users') return false;
   if (screen === 'performance') return false;
+  if (screen === 'settings') return false;
 
   return false;
 }
@@ -268,6 +280,7 @@ export function canSeeCustomer(u: UserProfile, c: CustomerScope): boolean {
   return !!c.customer_category_id && cats.includes(c.customer_category_id);
 }
 
-/** إدارة المستخدمين محصورة بالدور الأساسي دائماً، مهما كان التخصيص. */
+/** إدارة المستخدمين والإعدادات محصورة بالمدير دائماً. */
 export const canManageUsers = (u: UserProfile) => isAdmin(u);
+export const canManageSettings = (u: UserProfile) => isAdmin(u);
 export const canImport = (u: UserProfile) => isAdmin(u) || isAccountant(u);

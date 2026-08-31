@@ -610,6 +610,22 @@ export function useActivityLogs(limit = 50) {
   });
 }
 
+export function useSettingsActivityLogs(limit = 50) {
+  return useQuery({
+    queryKey: [...qk.activity, 'settings', limit],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('activity_logs')
+        .select('*')
+        .eq('table_name', 'settings')
+        .order('created_at', { ascending: false })
+        .limit(limit);
+      raise(error);
+      return (data ?? []) as ActivityLog[];
+    },
+  });
+}
+
 export function useUpdateSettings() {
   const qc = useQueryClient();
   return useMutation({
@@ -620,6 +636,9 @@ export function useUpdateSettings() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: qk.settings });
       qc.invalidateQueries({ queryKey: qk.customers });
+      qc.invalidateQueries({ queryKey: qk.notifications });
+      qc.invalidateQueries({ queryKey: qk.activity });
     },
   });
 }
+

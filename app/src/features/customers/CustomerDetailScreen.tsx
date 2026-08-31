@@ -14,15 +14,22 @@ import { CustomerModal } from './CustomerModal';
 import { FollowupModal } from '@/features/followups/FollowupModal';
 import { CollectionModal } from '@/features/collections/CollectionModal';
 import { CategoryDot, DuePill, NotificationPill, Pill } from '@/components/ui/Pill';
+import { Modal } from '@/components/ui/Modal';
 import { errorMessage, useToast } from '@/components/ui/Toast';
 import { classifyDue } from '@/lib/logic/dates';
 import { CURRENCY_LABELS, fmt } from '@/lib/logic/money';
 import { isCollector, screenAction } from '@/lib/permissions';
+import {
+  downloadAttachment,
+  getSignedAttachmentUrl,
+  isImageFile,
+  isPdfFile,
+} from '@/lib/storage';
 
 /**
  * ملف العميل الكامل — كما طلبه صاحب المشروع حرفياً: البيانات الشخصية، أرقام
  * التواصل، الضمانات، الأرصدة المستحقة بكل عملة، تفاصيل المديونية، مسؤول
- * التحصيل، وسجل تاريخي لكل المتابعات السابقة.
+ * التحصيل، وسجل تاريخي لكل المتابعات السابقة مع المرفقات والمستندات.
  */
 export function CustomerDetailScreen() {
   const { id } = useParams<{ id: string }>();
@@ -41,6 +48,10 @@ export function CustomerDetailScreen() {
   const [editOpen, setEditOpen] = useState(false);
   const [followupOpen, setFollowupOpen] = useState(false);
   const [collectionOpen, setCollectionOpen] = useState(false);
+
+  // حالة معاينة الصور المرفقة
+  const [previewImage, setPreviewImage] = useState<{ url: string; title: string } | null>(null);
+  const [loadingAttachmentId, setLoadingAttachmentId] = useState<string | null>(null);
 
   if (isLoading) return <div className="empty-state">جارٍ التحميل…</div>;
 
@@ -75,6 +86,37 @@ export function CustomerDetailScreen() {
       toast.show('تم رفع الحالة للمدير');
     } catch (e) {
       toast.error(errorMessage(e));
+    }
+  }
+
+  async function handleOpenAttachment(followupId: string, path: string, name?: string | null) {
+    try {
+      setLoadingAttachmentId(followupId);
+      const url = await getSignedAttachmentUrl(path);
+      const fileName = name || path.split('/').pop() || 'مرفق';
+
+      if (isImageFile(fileName) || isImageFile(path)) {
+        setPreviewImage({ url, title: fileName });
+      } else {
+        // فتح ملف PDF في تبويب جديد
+        window.open(url, '_blank', 'noopener,noreferrer');
+      }
+    } catch (e) {
+      toast.error(errorMessage(e));
+    } finally {
+      setLoadingAttachmentId(null);
+    }
+  }
+
+  async function handleDownloadAttachment(followupId: string, path: string, name?: string | null) {
+    try {
+      setLoadingAttachmentId(followupId);
+      await downloadAttachment(path, name || undefined);
+      toast.show('تم بدء تحميل الملف');
+    } catch (e) {
+      toast.error(errorMessage(e));
+    } finally {
+      setLoadingAttachmentId(null);
     }
   }
 
@@ -162,27 +204,67 @@ export function CustomerDetailScreen() {
             {followups.length === 0 ? (
               <div className="empty-state">لا توجد متابعات مسجّلة</div>
             ) : (
-              followups.map((f) => (
-                <div key={f.id} className="border-b border-gray-100 px-3.5 py-3 last:border-b-0">
-                  <div className="flex flex-wrap justify-between gap-2">
-                    <span className="text-[13px] font-semibold">
-                      {f.type_followup} — {userNames.get(f.user_id) ?? '—'}
-                    </span>
-                    <span className="mono text-xs text-gray-500">
-                      {f.followup_date} {f.followup_time?.slice(0, 5) ?? ''}
-                    </span>
-                  </div>
-                  <p className="mt-1 text-[13px] text-gray-700">{f.contact_result || '—'}</p>
-                  {f.details && <p className="mt-0.5 text-xs text-gray-500">{f.details}</p>}
-                  <div className="mt-1.5 flex flex-wrap gap-3 text-[11px] text-gray-500">
-                    {f.next_followup_date && <span>الموعد القادم: {f.next_followup_date}</span>}
-                    {f.level_seriousness && <span>الجدية: {f.level_seriousness}</span>}
-                    {f.expected_collection_amount > 0 && (
-                      <span>متوقع تحصيله: {fmt(f.expected_collection_amount)}</span>
+              followups.map((f) => {
+                const hasAttachment = Boolean(f.attachment_url);
+                const isLoadingThis = loadingAttachmentId === f.id;
+                const attachName = f.attachment_name || 'مرفق المتابعة';
+                const isImg = isImageFile(attachName) || (f.attachment_url ? isImageFile(f.attachment_url) : false);
+                const isPdf = isPdfFile(attachName) || (f.attachment_url ? isPdfFile(f.attachment_url) : false);
+
+                return (
+                  <div key={f.id} className="border-b border-gray-100 px-3.5 py-3 last:border-b-0">
+                    <div className="flex flex-wrap justify-between gap-2">
+                      <span className="text-[13px] font-semibold">
+                        {f.type_followup} — {userNames.get(f.user_id) ?? '—'}
+                      </span>
+                      <span className="mono text-xs text-gray-500">
+                        {f.followup_date} {f.followup_time?.slice(0, 5) ?? ''}
+                      </span>
+                    </div>
+                    <p className="mt-1 text-[13px] text-gray-700">{f.contact_result || '—'}</p>
+                    {f.details && <p className="mt-0.5 text-xs text-gray-500">{f.details}</p>}
+
+                    {/* عرض المرفق في السطر إن وُجد */}
+                    {hasAttachment && f.attachment_url && (
+                      <div className="mt-2.5 flex flex-wrap items-center justify-between gap-2 rounded-md border border-blue-100 bg-blue-50/60 px-3 py-2 text-xs dark:border-blue-900/40 dark:bg-blue-950/20">
+                        <div className="flex items-center gap-2 overflow-hidden">
+                          <span className="text-base">{isImg ? '🖼️' : isPdf ? '📄' : '📎'}</span>
+                          <span className="truncate font-medium text-blue-900 dark:text-blue-200">
+                            {attachName}
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={() => void handleOpenAttachment(f.id, f.attachment_url!, f.attachment_name)}
+                            disabled={isLoadingThis}
+                            className="btn btn-outline py-0.5 px-2 text-[11px] font-semibold text-blue-700 hover:bg-blue-100 dark:text-blue-300 dark:hover:bg-blue-900/50"
+                          >
+                            {isLoadingThis ? 'جارٍ التحميل…' : isImg ? 'معاينة الصورة' : 'فتح المستند'}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => void handleDownloadAttachment(f.id, f.attachment_url!, f.attachment_name)}
+                            disabled={isLoadingThis}
+                            className="btn btn-outline py-0.5 px-2 text-[11px] font-semibold text-gray-700 hover:bg-gray-200 dark:text-gray-300 dark:hover:bg-zinc-700"
+                            title="تحميل الملف إلى الجهاز"
+                          >
+                            تحميل ⬇
+                          </button>
+                        </div>
+                      </div>
                     )}
+
+                    <div className="mt-2 flex flex-wrap gap-3 text-[11px] text-gray-500">
+                      {f.next_followup_date && <span>الموعد القادم: {f.next_followup_date}</span>}
+                      {f.level_seriousness && <span>الجدية: {f.level_seriousness}</span>}
+                      {f.expected_collection_amount > 0 && (
+                        <span>متوقع تحصيله: {fmt(f.expected_collection_amount)}</span>
+                      )}
+                    </div>
                   </div>
-                </div>
-              ))
+                );
+              })
             )}
           </div>
 
@@ -330,6 +412,43 @@ export function CustomerDetailScreen() {
           customer={customer}
           onClose={() => setCollectionOpen(false)}
         />
+      )}
+
+      {/* نافذة معاينة الصور المرفقة */}
+      {previewImage && (
+        <Modal
+          open={Boolean(previewImage)}
+          title={`معاينة المرفق: ${previewImage.title}`}
+          onClose={() => setPreviewImage(null)}
+          wide
+          footer={
+            <div className="flex justify-between w-full">
+              <a
+                href={previewImage.url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="btn btn-outline text-xs"
+              >
+                فتح الصورة بالحجم الكامل ↗
+              </a>
+              <button
+                type="button"
+                className="btn btn-primary text-xs"
+                onClick={() => setPreviewImage(null)}
+              >
+                إغلاق
+              </button>
+            </div>
+          }
+        >
+          <div className="flex justify-center items-center max-h-[70vh] overflow-hidden bg-zinc-900/5 dark:bg-zinc-950 rounded-lg p-2">
+            <img
+              src={previewImage.url}
+              alt={previewImage.title}
+              className="max-h-[65vh] w-auto max-w-full rounded object-contain"
+            />
+          </div>
+        </Modal>
       )}
     </>
   );

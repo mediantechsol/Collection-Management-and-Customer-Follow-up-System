@@ -12,6 +12,7 @@ import { NotificationsScreen } from '@/features/notifications/NotificationsScree
 import { CollectionsScreen } from '@/features/collections/CollectionsScreen';
 import { PerformanceScreen } from '@/features/performance/PerformanceScreen';
 import { UsersScreen } from '@/features/users/UsersScreen';
+import { SettingsScreen } from '@/features/settings/SettingsScreen';
 import { defaultScreen } from '@/lib/permissions';
 
 /**
@@ -81,6 +82,9 @@ export default function App() {
         </Route>
         <Route element={<RequireScreen screen="users" />}>
           <Route path="/users" element={<UsersScreen />} />
+        </Route>
+        <Route element={<RequireScreen screen="settings" />}>
+          <Route path="/settings" element={<SettingsScreen />} />
         </Route>
 
         <Route path="*" element={<Navigate to={home} replace />} />

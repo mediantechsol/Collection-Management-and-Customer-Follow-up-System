@@ -89,4 +89,15 @@ describe.skipIf(!existsSync(FOLLOWUP_FILE))('ملف متابعة العملاء 
       expect(r.due_date).toMatch(/^\d{4}-\d{2}-\d{2}$/);
     }
   });
+
+  it('يستخرج إحصائيات الفئات ومسؤولي التحصيل بنجاح', () => {
+    const result = parseCustomersWorkbook({
+      profiles: sheetGrid(FOLLOWUP_FILE, 'بيانات العملاء'),
+      followups: sheetGrid(FOLLOWUP_FILE, 'متابعة العملاء'),
+    });
+    expect(Array.isArray(result.categories)).toBe(true);
+    expect(Array.isArray(result.assignees)).toBe(true);
+    expect(result.stats.withCollector).toBeGreaterThanOrEqual(0);
+    expect(result.stats.withCategory).toBeGreaterThanOrEqual(0);
+  });
 });

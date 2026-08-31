@@ -104,6 +104,22 @@
   .pill-blue {
     @apply bg-blue-50 text-blue-700;
   }
+  .pill-purple {
+    background: #F1ECFE;
+    color: #8B5CF6;
+  }
+  .days-chip {
+    @apply inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-bold;
+  }
+  .days-chip--ok {
+    @apply bg-green-50 text-green-500;
+  }
+  .days-chip--warn {
+    @apply bg-amber-50 text-amber-500;
+  }
+  .days-chip--danger {
+    @apply bg-red-50 text-red-500;
+  }
   .cat-dot {
     @apply ms-0 me-1.5 inline-block h-2 w-2 rounded-full;
   }

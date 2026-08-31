@@ -89,3 +89,26 @@ export const NOTIFICATION_META: Record<NotificationType, NotificationMeta> = {
 export function isNotificationType(v: string): v is NotificationType {
   return (NOTIFICATION_TYPES as readonly string[]).includes(v);
 }
+
+/** نص سبب / تفاصيل التنبيه لعرضه في عمود «السبب» بالجدول. */
+export function notificationReason(
+  type: NotificationType,
+  settings: { daysBeforeDueAlert: number; noFollowupDaysLimit: number },
+): string {
+  switch (type) {
+    case 'before_due':
+      return `موعد الاستحقاق بعد ${settings.daysBeforeDueAlert} أيام`;
+    case 'due_today':
+      return 'موعد الاستحقاق اليوم';
+    case 'shopping_now':
+      return 'العميل يسوّق الآن';
+    case 'promise_today':
+      return 'وعد بالسداد في تاريخ اليوم';
+    case 'stale':
+      return `مرور ${settings.noFollowupDaysLimit} يوماً بلا متابعة`;
+    case 'escalated':
+      return 'يحتاج مراجعة المدير';
+    default:
+      return type;
+  }
+}

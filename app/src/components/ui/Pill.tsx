@@ -2,7 +2,7 @@ import type { ReactNode } from 'react';
 import type { DueStatus } from '@/lib/logic/dates';
 import { NOTIFICATION_META, type NotificationType } from '@/lib/logic/notifications';
 
-type Tone = 'green' | 'amber' | 'red' | 'gray' | 'blue';
+type Tone = 'green' | 'amber' | 'red' | 'gray' | 'blue' | 'purple';
 
 export function Pill({ tone = 'gray', children }: { tone?: Tone; children: ReactNode }) {
   return <span className={`pill pill-${tone}`}>{children}</span>;

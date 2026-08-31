@@ -155,6 +155,53 @@ export const IconArrow = (p: Props) => (
   </svg>
 );
 
+export const IconSettings = (p: Props) => (
+  <svg {...base} {...p}>
+    <circle cx="12" cy="12" r="3" />
+    <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z" />
+  </svg>
+);
+
+export const IconBuilding = (p: Props) => (
+  <svg {...base} {...p}>
+    <path d="M6 22V4a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v18Z" />
+    <path d="M6 12H4a2 2 0 0 0-2 2v8h4" />
+    <path d="M18 9h2a2 2 0 0 1 2 2v11h-4" />
+    <path d="M10 6h4M10 10h4M10 14h4M10 18h4" />
+  </svg>
+);
+
+export const IconTag = (p: Props) => (
+  <svg {...base} {...p}>
+    <path d="M12 2H2v10l9.29 9.29c.94.94 2.48.94 3.42 0l6.58-6.58c.94-.94.94-2.48 0-3.42L12 2Z" />
+    <path d="M7 7h.01" />
+  </svg>
+);
+
+export const IconExchange = (p: Props) => (
+  <svg {...base} {...p}>
+    <path d="M7 10h14l-4-4" />
+    <path d="M17 14H3l4 4" />
+  </svg>
+);
+
+export const IconHistory = (p: Props) => (
+  <svg {...base} {...p}>
+    <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" />
+    <path d="M3 3v5h5" />
+    <path d="M12 7v5l4 2" />
+  </svg>
+);
+
+export const IconCalculator = (p: Props) => (
+  <svg {...base} {...p}>
+    <rect x="4" y="2" width="16" height="20" rx="2" />
+    <line x1="8" x2="16" y1="6" y2="6" />
+    <line x1="16" x2="16" y1="14" />
+    <path d="M16 10h.01M12 10h.01M8 10h.01M12 14h.01M8 14h.01M12 18h.01M8 18h.01" />
+  </svg>
+);
+
 import type { IconName } from '@/lib/logic/notifications';
 import type { ScreenKey } from '@/lib/permissions';
 
@@ -176,4 +223,5 @@ export const SCREEN_ICONS: Record<ScreenKey, (p: Props) => JSX.Element> = {
   import: IconUpload,
   performance: IconChart,
   users: IconShield,
+  settings: IconSettings,
 };

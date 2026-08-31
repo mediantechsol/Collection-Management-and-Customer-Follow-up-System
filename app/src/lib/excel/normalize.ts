@@ -26,6 +26,19 @@ export function normalizeArabic(value: unknown): string {
     .trim();
 }
 
+/**
+ * يطابق اسماً عربياً مع قائمة أسماء مرجعية بعد تطبيع الطرفين.
+ * يُرجع العنصر المطابق الأصلي أو null إن لم يوجد.
+ */
+export function matchNormalized<T>(
+  input: string,
+  candidates: T[],
+  accessor: (item: T) => string,
+): T | null {
+  const norm = normalizeArabic(input);
+  return candidates.find((c) => normalizeArabic(accessor(c)) === norm) ?? null;
+}
+
 /** نص خلية بعد التنظيف، أو null إن كانت فارغة فعلياً. */
 export function cellText(value: unknown): string | null {
   if (value === null || value === undefined) return null;
