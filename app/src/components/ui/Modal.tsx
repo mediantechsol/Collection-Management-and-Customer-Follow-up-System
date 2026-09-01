@@ -3,7 +3,7 @@ import { IconClose } from './Icons';
 
 interface Props {
   open: boolean;
-  title: string;
+  title: ReactNode;
   onClose: () => void;
   children: ReactNode;
   footer?: ReactNode;
@@ -37,7 +37,7 @@ export function Modal({ open, title, onClose, children, footer, wide = false }: 
       <div
         role="dialog"
         aria-modal="true"
-        aria-label={title}
+        aria-label={typeof title === 'string' ? title : undefined}
         className={`max-h-[90vh] w-full overflow-y-auto rounded-[10px] bg-white shadow-[0_20px_60px_rgba(0,0,0,0.25)] ${
           wide ? 'max-w-2xl' : 'max-w-lg'
         }`}

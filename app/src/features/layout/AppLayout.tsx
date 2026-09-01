@@ -1,9 +1,10 @@
 import { useState } from 'react';
 import { NavLink, Outlet, useLocation } from 'react-router-dom';
 import { useAuth, useProfile } from '@/features/auth/AuthContext';
-import { useNotifications } from '@/lib/queries';
+import { useCustomReminders, useNotifications } from '@/lib/queries';
 import { IconLogout, IconMenu, IconClose, SCREEN_ICONS } from '@/components/ui/Icons';
 import { allowedScreens, isAdmin, isAccountant, SCREEN_LABELS, type ScreenKey } from '@/lib/permissions';
+import { todayStr } from '@/lib/logic/dates';
 
 /**
  * الهيكل العام: قائمة جانبية + شريط علوي.
@@ -21,11 +22,20 @@ export function AppLayout() {
   const title = currentScreen && SCREEN_LABELS[currentScreen] ? SCREEN_LABELS[currentScreen] : '';
 
   const { data: notifications } = useNotifications();
-  const unread = (notifications ?? []).filter(
+  const { data: reminders } = useCustomReminders();
+  const today = todayStr();
+
+  const unreadNotifs = (notifications ?? []).filter(
     (n) =>
       n.status !== 'تم التعامل' &&
       (isAdmin(profile) || isAccountant(profile) || n.user_id === profile.id),
   ).length;
+
+  const dueRemindersCount = (reminders ?? []).filter(
+    (r) => !r.is_completed && r.due_date <= today,
+  ).length;
+
+  const unread = unreadNotifs + dueRemindersCount;
 
   const initials = (profile.full_name || '')
     .trim()

@@ -139,6 +139,7 @@ export const FIELD_CATALOG: Partial<Record<ScreenKey, CatalogEntry[]>> = {
     { key: 'due_date', label: 'تاريخ الاستحقاق' },
     { key: 'customer_name', label: 'اسم العميل' },
     { key: 'mobile_1', label: 'الجوال' },
+    { key: 'personal_tier', label: 'التصنيف الشخصي' },
     { key: 'remaining', label: 'المتبقي عليه' },
     { key: 'status_pill', label: 'حالة الاستحقاق' },
     { key: 'assigned_user', label: 'مسؤول المتابعة' },

@@ -4,6 +4,7 @@ import { useToast, errorMessage } from '@/components/ui/Toast';
 import { useAddFollowup } from '@/lib/queries';
 import { useProfile } from '@/features/auth/AuthContext';
 import { todayStr } from '@/lib/logic/dates';
+import { IconFileText, IconImage, IconPaperclip } from '@/components/ui/Icons';
 import {
   formatFileSize,
   isImageFile,
@@ -285,7 +286,7 @@ export function FollowupModal({ customerId, customerName, open, onClose }: Props
               onChange={onFileInputChange}
             />
             <div className="flex flex-col items-center gap-1.5 text-xs text-gray-600 dark:text-gray-300">
-              <span className="text-xl">📎</span>
+              <IconPaperclip className="h-6 w-6 text-gray-400" />
               <span>
                 اسحب وأفلت الملف هنا أو <span className="font-semibold text-blue-600 underline">اضغط للاستعراض</span>
               </span>
@@ -298,9 +299,13 @@ export function FollowupModal({ customerId, customerName, open, onClose }: Props
           <div className="flex flex-col gap-2 rounded-lg border border-gray-200 bg-white p-3 shadow-sm dark:border-zinc-700 dark:bg-zinc-800">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2.5 overflow-hidden">
-                <span className="text-xl">
-                  {isImageFile(selectedFile.name) ? '🖼️' : isPdfFile(selectedFile.name) ? '📄' : '📎'}
-                </span>
+                {isImageFile(selectedFile.name) ? (
+                  <IconImage className="h-5 w-5 text-blue-600 shrink-0" />
+                ) : isPdfFile(selectedFile.name) ? (
+                  <IconFileText className="h-5 w-5 text-red-600 shrink-0" />
+                ) : (
+                  <IconPaperclip className="h-5 w-5 text-gray-500 shrink-0" />
+                )}
                 <div className="min-w-0">
                   <p className="truncate text-xs font-semibold text-gray-800 dark:text-zinc-200">
                     {selectedFile.name}

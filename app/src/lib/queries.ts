@@ -22,16 +22,26 @@ import type {
   AppSettings,
   AppUser,
   Collection,
+  CollectorTierSetting,
+  CreateReminderInput,
+  CustomReminder,
   Customer,
   CustomerCategory,
   CustomerOverview,
+  CustomerPersonalAssignment,
   ExcelImport,
   Followup,
   Incentive,
   IncentivePayment,
   ImportBalancesResult,
   ImportCustomersResult,
+  PersonalTierKey,
   Role,
+  SystemBackupPayload,
+  SystemBackupRecord,
+  BackupType,
+  BackupValidationResult,
+  RestoreBackupResult,
   UserDirectoryEntry,
   UUID,
 } from '@/types/models';
@@ -65,6 +75,10 @@ export const qk = {
     summary: (filters?: AnalyticsFilters) => ['analytics', 'summary', filters ?? {}] as const,
     charts: (filters?: AnalyticsFilters) => ['analytics', 'charts', filters ?? {}] as const,
   },
+  personalTiers: ['personal_tiers'] as const,
+  personalAssignments: ['personal_assignments'] as const,
+  customReminders: ['custom_reminders'] as const,
+  systemBackups: ['system_backups'] as const,
 };
 
 /* ============================================================ الإعدادات والمراجع */
@@ -703,5 +717,384 @@ export function useAnalyticsCharts(filters?: AnalyticsFilters) {
     },
   });
 }
+
+/* ============================================================ التصنيف الشخصي للمحصل (V2) */
+
+/** جلب أو تهيئة الفئات الأربع الافتراضية للمستخدم الحالي */
+export function usePersonalTiers() {
+  return useQuery({
+    queryKey: qk.personalTiers,
+    queryFn: async () => {
+      const { data, error } = await supabase.rpc('get_or_init_user_tiers');
+      raise(error);
+      return (data ?? []) as CollectorTierSetting[];
+    },
+    staleTime: 5 * 60_000,
+  });
+}
+
+/** جلب جميع تعيينات العملاء للفئات الشخصية للمستخدم الحالي */
+export function usePersonalAssignments() {
+  return useQuery({
+    queryKey: qk.personalAssignments,
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('customer_personal_assignments')
+        .select('*');
+      raise(error);
+      return (data ?? []) as CustomerPersonalAssignment[];
+    },
+  });
+}
+
+/** تعيين فئة العميل الشخصية بنقرة واحدة (Upsert) مع تحديث تفاؤلي فوري */
+export function useSetCustomerPersonalTier() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({
+      customerId,
+      tierKey,
+    }: {
+      customerId: UUID;
+      tierKey: PersonalTierKey;
+    }) => {
+      const { data, error } = await supabase.rpc('set_customer_personal_tier', {
+        p_customer_id: customerId,
+        p_tier_key: tierKey,
+      });
+      raise(error);
+      return data as CustomerPersonalAssignment;
+    },
+    onMutate: async ({ customerId, tierKey }) => {
+      await qc.cancelQueries({ queryKey: qk.personalAssignments });
+      const previous = qc.getQueryData<CustomerPersonalAssignment[]>(qk.personalAssignments);
+
+      qc.setQueryData<CustomerPersonalAssignment[]>(qk.personalAssignments, (old = []) => {
+        const idx = old.findIndex((a) => a.customer_id === customerId);
+        if (idx >= 0) {
+          const updated = [...old];
+          updated[idx] = { ...updated[idx], tier_key: tierKey, updated_at: new Date().toISOString() };
+          return updated;
+        }
+        return [
+          ...old,
+          {
+            id: 'temp-' + Date.now(),
+            user_id: '',
+            customer_id: customerId,
+            tier_key: tierKey,
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+          },
+        ];
+      });
+
+      return { previous };
+    },
+    onError: (_err, _vars, context) => {
+      if (context?.previous) {
+        qc.setQueryData(qk.personalAssignments, context.previous);
+      }
+    },
+    onSettled: () => {
+      qc.invalidateQueries({ queryKey: qk.personalAssignments });
+    },
+  });
+}
+
+/** تحديث مسميات وألوان الفئات الشخصية */
+export function useUpdateTierSettings() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (tiers: Array<{ id: UUID; tier_name: string; color: string }>) => {
+      for (const tier of tiers) {
+        const { error } = await supabase
+          .from('collector_tier_settings')
+          .update({
+            tier_name: tier.tier_name,
+            color: tier.color,
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', tier.id);
+        raise(error);
+      }
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: qk.personalTiers });
+    },
+  });
+}
+
+/* ============================================================ التذكيرات الحرة المخصصة "ذكرني" (V2) */
+
+/** جلب جميع تذكيرات المستخدم الحالي مع بيانات العميل المربوط اختياريّاً */
+export function useCustomReminders(filter?: {
+  customerId?: UUID | null;
+  status?: 'active' | 'completed' | 'all';
+}) {
+  return useQuery({
+    queryKey: [...qk.customReminders, filter ?? {}],
+    queryFn: async () => {
+      let query = supabase
+        .from('custom_reminders')
+        .select(`
+          *,
+          customers (
+            customer_name,
+            customer_number
+          )
+        `)
+        .order('due_date', { ascending: true })
+        .order('created_at', { ascending: false });
+
+      if (filter?.customerId) {
+        query = query.eq('customer_id', filter.customerId);
+      }
+      if (filter?.status === 'active') {
+        query = query.eq('is_completed', false);
+      } else if (filter?.status === 'completed') {
+        query = query.eq('is_completed', true);
+      }
+
+      const { data, error } = await query;
+      raise(error);
+
+      return (data ?? []).map((row: any) => ({
+        ...row,
+        customer_name: row.customers?.customer_name ?? null,
+        customer_number: row.customers?.customer_number ?? null,
+      })) as CustomReminder[];
+    },
+  });
+}
+
+/** إنشاء تذكير مخصص سريع عبر دالة RPC مع التحديث التفاؤلي */
+export function useCreateCustomReminder() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: CreateReminderInput) => {
+      const { data, error } = await supabase.rpc('create_custom_reminder', {
+        p_customer_id: input.customerId ?? null,
+        p_title: input.title,
+        p_notes: input.notes ?? null,
+        p_due_date: input.dueDate,
+        p_due_time: input.dueTime ?? null,
+        p_priority: input.priority ?? 'normal',
+      });
+      raise(error);
+      return data as CustomReminder;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: qk.customReminders });
+    },
+  });
+}
+
+/** تبديل حالة إنجاز التذكير (Toggle Completion) مع تحديث تفاؤلي فوري */
+export function useToggleReminderStatus() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({
+      reminderId,
+      isCompleted,
+    }: {
+      reminderId: UUID;
+      isCompleted: boolean;
+    }) => {
+      const { data, error } = await supabase.rpc('toggle_reminder_status', {
+        p_reminder_id: reminderId,
+        p_is_completed: isCompleted,
+      });
+      raise(error);
+      return data as CustomReminder;
+    },
+    onMutate: async ({ reminderId, isCompleted }) => {
+      await qc.cancelQueries({ queryKey: qk.customReminders });
+      const previous = qc.getQueryData<CustomReminder[]>(qk.customReminders);
+
+      qc.setQueriesData<CustomReminder[]>({ queryKey: qk.customReminders }, (old = []) => {
+        return old.map((r) =>
+          r.id === reminderId
+            ? {
+                ...r,
+                is_completed: isCompleted,
+                completed_at: isCompleted ? new Date().toISOString() : null,
+                updated_at: new Date().toISOString(),
+              }
+            : r,
+        );
+      });
+
+      return { previous };
+    },
+    onError: (_err, _vars, context) => {
+      if (context?.previous) {
+        qc.setQueryData(qk.customReminders, context.previous);
+      }
+    },
+    onSettled: () => {
+      qc.invalidateQueries({ queryKey: qk.customReminders });
+    },
+  });
+}
+
+/** تأجيل موعد التذكير بعدد محدد من الأيام */
+export function useSnoozeReminder() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({
+      reminderId,
+      daysToAdd,
+    }: {
+      reminderId: UUID;
+      daysToAdd: number;
+    }) => {
+      const { data, error } = await supabase.rpc('snooze_reminder', {
+        p_reminder_id: reminderId,
+        p_days_to_add: daysToAdd,
+      });
+      raise(error);
+      return data as CustomReminder;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: qk.customReminders });
+    },
+  });
+}
+
+/** حذف تذكير مخصص */
+export function useDeleteCustomReminder() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (reminderId: UUID) => {
+      const { error } = await supabase
+        .from('custom_reminders')
+        .delete()
+        .eq('id', reminderId);
+      raise(error);
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: qk.customReminders });
+    },
+  });
+}
+
+/* ============================================================ النسخ الاحتياطي والاستعادة (V2) */
+
+/** استرجاع سجل كافة النسخ الاحتياطية لمدير النظام */
+export function useSystemBackups() {
+  return useQuery({
+    queryKey: qk.systemBackups,
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('system_backups')
+        .select('*')
+        .order('created_at', { ascending: false });
+      raise(error);
+      return (data ?? []) as SystemBackupRecord[];
+    },
+  });
+}
+
+/** توليد وتصدير نسخة احتياطية شاملة مع التنزيل الفوري للمتصفح */
+export function useGenerateBackup() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({
+      backupType = 'manual',
+      notes,
+      autoDownload = true,
+    }: {
+      backupType?: BackupType;
+      notes?: string;
+      autoDownload?: boolean;
+    } = {}) => {
+      const { data, error } = await supabase.rpc('generate_system_backup_json', {
+        p_backup_type: backupType,
+        p_notes: notes ?? null,
+      });
+      raise(error);
+
+      const payload = data as SystemBackupPayload;
+
+      if (autoDownload && payload) {
+        const jsonStr = JSON.stringify(payload, null, 2);
+        const blob = new Blob([jsonStr], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = payload.manifest?.file_name || `backup_${Date.now()}.json`;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        URL.revokeObjectURL(url);
+      }
+
+      return payload;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: qk.systemBackups });
+      qc.invalidateQueries({ queryKey: qk.activity });
+    },
+  });
+}
+
+/** حذف سجل نسخة احتياطية من قبل مدير النظام */
+export function useDeleteBackupRecord() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (backupId: UUID) => {
+      const { data, error } = await supabase.rpc('delete_system_backup_record', {
+        p_backup_id: backupId,
+      });
+      raise(error);
+      return data;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: qk.systemBackups });
+      qc.invalidateQueries({ queryKey: qk.activity });
+    },
+  });
+}
+
+/** فحص وتدقيق حزمة النسخة الاحتياطية قبل الاستعادة */
+export function useValidateBackupPayload() {
+  return useMutation({
+    mutationFn: async (payload: SystemBackupPayload) => {
+      const { data, error } = await supabase.rpc('validate_system_backup_payload', {
+        p_payload: payload,
+      });
+      raise(error);
+      return data as BackupValidationResult;
+    },
+  });
+}
+
+/** استعادة شاملة وذرية للنظام من حزمة النسخة الاحتياطية */
+export function useRestoreBackup() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({
+      payload,
+      createSafetySnapshot = true,
+    }: {
+      payload: SystemBackupPayload;
+      createSafetySnapshot?: boolean;
+    }) => {
+      const { data, error } = await supabase.rpc('restore_system_backup', {
+        p_payload: payload,
+        p_create_safety_snapshot: createSafetySnapshot,
+      });
+      raise(error);
+      return data as RestoreBackupResult;
+    },
+    onSuccess: () => {
+      // إبطال كافة استعلامات النظام لإعادة جلب البيانات المحدثة
+      qc.invalidateQueries();
+    },
+  });
+}
+
+
 
 

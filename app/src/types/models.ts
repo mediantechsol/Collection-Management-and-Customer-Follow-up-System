@@ -338,3 +338,131 @@ export interface AnalyticsChartsData {
   top_10_debtors: TopDebtorItem[];
 }
 
+/* ---------------------------------------------------------------- التصنيف الشخصي للمحصل (V2) */
+
+export type PersonalTierKey = 'A' | 'B' | 'C' | 'D';
+
+export interface CollectorTierSetting {
+  id: UUID;
+  user_id: UUID;
+  tier_key: PersonalTierKey;
+  tier_name: string;
+  color: string;
+  sort_order: number;
+  created_at: ISODateTime;
+  updated_at: ISODateTime;
+}
+
+export interface CustomerPersonalAssignment {
+  id: UUID;
+  user_id: UUID;
+  customer_id: UUID;
+  tier_key: PersonalTierKey;
+  created_at: ISODateTime;
+  updated_at: ISODateTime;
+}
+
+/* ---------------------------------------------------------------- التذكيرات الحرة المخصصة "ذكرني" (V2) */
+
+export type ReminderPriority = 'low' | 'normal' | 'high' | 'urgent';
+
+export interface CustomReminder {
+  id: UUID;
+  user_id: UUID;
+  customer_id?: UUID | null;
+  customer_name?: string | null;
+  customer_number?: string | null;
+  title: string;
+  notes?: string | null;
+  due_date: ISODate;
+  due_time?: string | null;
+  priority: ReminderPriority;
+  is_completed: boolean;
+  completed_at?: ISODateTime | null;
+  snoozed_until?: ISODate | null;
+  created_at: ISODateTime;
+  updated_at: ISODateTime;
+}
+
+export interface CreateReminderInput {
+  customerId?: UUID | null;
+  title: string;
+  notes?: string | null;
+  dueDate: ISODate;
+  dueTime?: string | null;
+  priority?: ReminderPriority;
+}
+
+/* ---------------------------------------------------------------- النسخ الاحتياطي والاستعادة (V2) */
+
+export type BackupType = 'manual' | 'auto_scheduled' | 'safety_pre_restore';
+
+export interface SystemBackupRecord {
+  id: UUID;
+  backup_name: string;
+  file_name: string;
+  file_size_bytes: number;
+  storage_path?: string | null;
+  backup_type: BackupType;
+  checksum_sha256: string;
+  table_counts: Record<string, number>;
+  notes?: string | null;
+  created_by?: UUID | null;
+  created_at: ISODateTime;
+}
+
+export interface BackupPayloadManifest {
+  format_version: string;
+  app_version: string;
+  backup_type: BackupType;
+  backup_id: string;
+  backup_name: string;
+  file_name: string;
+  checksum_sha256: string;
+  created_at: string;
+  created_by_username: string;
+  created_by_user_id: string;
+  notes?: string | null;
+  table_counts: Record<string, number>;
+}
+
+export interface SystemBackupPayload {
+  manifest: BackupPayloadManifest;
+  tables: {
+    settings: any[];
+    customer_categories: any[];
+    customers: any[];
+    balances: any[];
+    balance_history: any[];
+    due_dates: any[];
+    followups: any[];
+    collections: any[];
+    incentives: any[];
+    incentive_payments: any[];
+    notifications: any[];
+    excel_imports: any[];
+    collector_tier_settings: any[];
+    customer_personal_assignments: any[];
+    custom_reminders: any[];
+  };
+}
+
+export interface BackupValidationResult {
+  is_valid: boolean;
+  manifest: BackupPayloadManifest;
+  table_counts: Record<string, number>;
+  current_database_counts: {
+    customers: number;
+    balances: number;
+    followups: number;
+    collections: number;
+    custom_reminders: number;
+  };
+}
+
+export interface RestoreBackupResult {
+  success: boolean;
+  message: string;
+  restored_counts: Record<string, number>;
+  safety_snapshot_id?: string;
+}

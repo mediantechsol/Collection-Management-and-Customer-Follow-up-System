@@ -1325,3 +1325,1804 @@ grant execute on function public.escalate_customer(uuid, text) to authenticated;
 grant execute on function public.generate_daily_notifications(date) to authenticated;
 grant execute on function public.import_balances(text, jsonb, boolean) to authenticated;
 grant execute on function public.import_customers(text, jsonb) to authenticated;
+
+
+-- ############################################################################
+-- ### 20260101000006_settings_upgrade.sql
+-- ############################################################################
+
+-- ============================================================================
+-- 16) ترقية وحدة الإعدادات المركزية (Central Settings Upgrade)
+-- ============================================================================
+
+-- ----------------------------------------------------------------------------
+-- 1. إضافة حقول الإعدادات العامة والتنبيهات والعملات إلى جدول settings
+-- ----------------------------------------------------------------------------
+alter table public.settings
+  add column if not exists company_name text not null default 'مكتب الدكتور أيمن لخدمات الدواجن',
+  add column if not exists system_name text not null default 'Smart Collection Platform',
+  add column if not exists language text not null default 'ar',
+  add column if not exists direction text not null default 'rtl',
+  add column if not exists date_format text not null default 'YYYY-MM-DD',
+  add column if not exists alert_due_soon_enabled boolean not null default true,
+  add column if not exists alert_due_today_enabled boolean not null default true,
+  add column if not exists alert_shopping_now_enabled boolean not null default true,
+  add column if not exists alert_promise_enabled boolean not null default true,
+  add column if not exists alert_stale_enabled boolean not null default true,
+  add column if not exists alert_escalated_enabled boolean not null default true,
+  add column if not exists currencies_config jsonb not null default '[
+    {"code":"YER","name":"ريال يمني","symbol":"ر.ي","rate":1,"is_base":true,"is_active":true},
+    {"code":"USD","name":"دولار أمريكي","symbol":"$","rate":530,"is_base":false,"is_active":true},
+    {"code":"SAR","name":"ريال سعودي","symbol":"ر.س","rate":141,"is_base":false,"is_active":true}
+  ]'::jsonb;
+
+-- ----------------------------------------------------------------------------
+-- 2. تفعيل التدقيق وسجل العمليات على جدول الإعدادات
+-- ----------------------------------------------------------------------------
+drop trigger if exists trg_audit_settings on public.settings;
+create trigger trg_audit_settings
+  after insert or update or delete on public.settings
+  for each row execute function public.audit_row();
+
+-- ----------------------------------------------------------------------------
+-- 3. تحديث دالة توليد التنبيهات لمراعاة مفاتيح تفعيل/تعطيل التنبيهات
+-- ----------------------------------------------------------------------------
+create or replace function public.generate_daily_notifications(p_today date default current_date)
+returns integer language plpgsql security definer set search_path = public as $$
+declare
+  v_s        public.settings%rowtype;
+  v_inserted integer := 0;
+begin
+  if auth.uid() is not null
+     and not (public.is_active_user() and (public.is_admin() or public.is_accountant()))
+  then
+    raise exception 'غير مصرّح: توليد التنبيهات مقتصر على مدير النظام والمحاسب';
+  end if;
+
+  select * into v_s from public.settings limit 1;
+
+  with due as (
+    select c.id as customer_id, c.assigned_user_id, c.status_customer,
+           d.remaining_days
+    from public.customers c
+    left join public.customer_due_view d on d.customer_id = c.id
+    where c.is_active and c.assigned_user_id is not null
+  ),
+  candidates as (
+    -- 1) قبل الاستحقاق بـ N أيام
+    select customer_id, assigned_user_id, 'before_due' as t
+    from due
+    where v_s.alert_due_soon_enabled and remaining_days = v_s.days_before_due_alert
+    union all
+    -- 2) يوم الاستحقاق
+    select customer_id, assigned_user_id, 'due_today'
+    from due
+    where v_s.alert_due_today_enabled and remaining_days = 0
+    union all
+    -- 3) يسوق الآن
+    select customer_id, assigned_user_id, 'shopping_now'
+    from due
+    where v_s.alert_shopping_now_enabled and status_customer = v_s.shopping_status_label
+    union all
+    -- 4) وعد بالسداد اليوم
+    select f.customer_id, c.assigned_user_id, 'promise_today'
+    from public.followups f
+    join public.customers c on c.id = f.customer_id
+    where v_s.alert_promise_enabled
+      and f.next_followup_date = p_today
+      and f.contact_result ilike '%' || v_s.promise_keyword || '%'
+      and c.is_active and c.assigned_user_id is not null
+    union all
+    -- 5) لم تتم متابعته منذ مدة
+    select d.customer_id, d.assigned_user_id, 'stale'
+    from due d
+    where v_s.alert_stale_enabled
+      and not exists (
+        select 1 from public.followups f
+        where f.customer_id = d.customer_id
+          and f.followup_date > p_today - v_s.no_followup_days_limit
+          and f.followup_date <= p_today
+      )
+  ),
+  ins as (
+    insert into public.notifications (customer_id, user_id, notification_type, notification_date)
+    select distinct customer_id, assigned_user_id, t, p_today from candidates
+    on conflict (customer_id, notification_type, notification_date) do nothing
+    returning 1
+  )
+  select count(*) into v_inserted from ins;
+
+  return v_inserted;
+end;
+$$;
+
+
+-- ############################################################################
+-- ### 20260101000007_followup_attachments.sql
+-- ############################################################################
+
+-- ============================================================================
+-- ترقية نظام المتابعات: إرفاق المستندات والملفات (Storage Bucket & Schema)
+-- ============================================================================
+
+-- 1) إضافة حقلي المرفق في جدول المتابعات
+alter table public.followups
+  add column if not exists attachment_url text,
+  add column if not exists attachment_name text;
+
+-- 2) إنشاء أو تحديث Bucket تخزين مرفقات المتابعة
+insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+values (
+  'followup-attachments',
+  'followup-attachments',
+  false,
+  5242880, -- 5 MB
+  array['image/jpeg', 'image/png', 'image/webp', 'application/pdf']
+)
+on conflict (id) do update set
+  public = excluded.public,
+  file_size_limit = excluded.file_size_limit,
+  allowed_mime_types = excluded.allowed_mime_types;
+
+-- 3) سياسات الوصول والحماية (RLS) لكائنات التخزين
+-- ملاحظة: المسار المعتمد للملفات هو: <customer_id>/<file_name>
+drop policy if exists followup_attachments_select on storage.objects;
+create policy followup_attachments_select on storage.objects for select using (
+  bucket_id = 'followup-attachments'
+  and public.is_active_user()
+  and (
+    public.is_admin()
+    or public.is_accountant()
+    or (
+      nullif(split_part(name, '/', 1), '') is not null
+      and public.can_see_customer(nullif(split_part(name, '/', 1), '')::uuid)
+    )
+  )
+);
+
+drop policy if exists followup_attachments_insert on storage.objects;
+create policy followup_attachments_insert on storage.objects for insert with check (
+  bucket_id = 'followup-attachments'
+  and public.is_active_user()
+  and (
+    public.is_admin()
+    or public.is_accountant()
+    or (
+      nullif(split_part(name, '/', 1), '') is not null
+      and public.can_see_customer(nullif(split_part(name, '/', 1), '')::uuid)
+    )
+  )
+);
+
+drop policy if exists followup_attachments_delete on storage.objects;
+create policy followup_attachments_delete on storage.objects for delete using (
+  bucket_id = 'followup-attachments'
+  and public.is_active_user()
+  and (
+    public.is_admin()
+    or public.is_accountant()
+    or (
+      nullif(split_part(name, '/', 1), '') is not null
+      and public.can_see_customer(nullif(split_part(name, '/', 1), '')::uuid)
+    )
+  )
+);
+
+
+-- ############################################################################
+-- ### 20260901000001_fix_import_balances_foreign_currency.sql
+-- ############################################################################
+
+-- =============================================================================
+-- إصلاح: الدفعات المحصّلة بالعملة الأجنبية (USD/SAR) لا تُسجَّل عند الاستيراد
+--
+-- التاريخ: 2026-09-01
+-- المشكلة:
+--   1) شرط EXISTS كان يشترط وجود رصيد سابق بنفس العملة، مما يحجب العملاء
+--      الذين يظهرون لأول مرة بعملة USD أو SAR (رغم أنهم عملاء قائمون بعملة YER).
+--   2) أسعار الصرف قد تكون NULL إذا كان جدول settings فارغاً، مما يتسبب
+--      في فشل صامت بسبب قيد NOT NULL على عمود amount_yer.
+--   3) غياب شرط صريح على (h.credit - h.prev_credit) > 0 في WHERE، مما
+--      يتيح محاولة إدراج دفعة بمبلغ صفر ويفشل بسبب check (amount > 0).
+-- =============================================================================
+
+create or replace function public.import_balances(
+  p_file_name text,
+  p_rows jsonb,
+  p_derive_collections boolean default true
+) returns jsonb language plpgsql security definer set search_path = public, pg_temp as $$
+declare
+  v_import_id   uuid;
+  v_uid         uuid := auth.uid();
+  v_rate_usd    numeric;
+  v_rate_sar    numeric;
+  v_new_customers int := 0;
+  v_rows        int := 0;
+  v_collections int := 0;
+begin
+  if not (public.is_active_user() and (public.is_admin() or public.is_accountant())) then
+    raise exception 'غير مصرّح: الاستيراد مقتصر على مدير النظام والمحاسب';
+  end if;
+  if jsonb_typeof(p_rows) <> 'array' or jsonb_array_length(p_rows) = 0 then
+    raise exception 'لا توجد صفوف صالحة للاستيراد';
+  end if;
+
+  perform set_config('app.skip_audit', 'on', true);
+
+  -- [إصلاح #2] استخدام COALESCE لحماية حساب amount_yer من NULL
+  select coalesce(exchange_rate_usd, 530),
+         coalesce(exchange_rate_sar, 141)
+  into v_rate_usd, v_rate_sar
+  from public.settings limit 1;
+
+  -- في حالة عدم وجود صف في settings نضمن قيمة افتراضية آمنة
+  v_rate_usd := coalesce(v_rate_usd, 530);
+  v_rate_sar := coalesce(v_rate_sar, 141);
+
+  insert into public.excel_imports(file_name, file_type, imported_by, status)
+  values (p_file_name, 'balances', v_uid, 'نجاح')
+  returning id into v_import_id;
+
+  -- تجميع الصفوف الواردة: رقم عميل مطبَّع + عملة، مع جمع التكرارات داخل الملف
+  create temp table _in_bal on commit drop as
+  select
+    public.normalize_customer_number(r->>'customer_number')  as customer_number,
+    max(nullif(trim(r->>'customer_name'), ''))               as customer_name,
+    (r->>'currency')                                         as currency,
+    sum(coalesce((r->>'debit')::numeric, 0))                 as debit,
+    sum(coalesce((r->>'credit')::numeric, 0))                as credit
+  from jsonb_array_elements(p_rows) r
+  where public.normalize_customer_number(r->>'customer_number') is not null
+    and (r->>'currency') in ('YER','USD','SAR')
+  group by 1, 3;
+
+  select count(*) into v_rows from _in_bal;
+
+  -- إنشاء العملاء الجدد فقط (لا نلمس بيانات عميل قائم من ملف أرصدة)
+  with ins as (
+    insert into public.customers(customer_number, customer_name)
+    select i.customer_number, coalesce(i.customer_name, i.customer_number)
+    from (select distinct on (customer_number) customer_number, customer_name
+          from _in_bal order by customer_number) i
+    left join public.customers c on c.customer_number = i.customer_number
+    where c.id is null
+    returning 1
+  )
+  select count(*) into v_new_customers from ins;
+
+  -- الأرشيف: القيم الجديدة مع السابقة (قبل التحديث)
+  insert into public.balance_history(import_id, customer_id, currency, debit, credit, prev_debit, prev_credit)
+  select v_import_id, c.id, i.currency, i.debit, i.credit,
+         coalesce(b.debit, 0), coalesce(b.credit, 0)
+  from _in_bal i
+  join public.customers c on c.customer_number = i.customer_number
+  left join public.balances b on b.customer_id = c.id and b.currency = i.currency;
+
+  -- اشتقاق الدفعات المحصّلة قبل تحديث balances (لأنها ما تزال تحمل الحالة السابقة)
+  if p_derive_collections then
+    insert into public.collections(
+      customer_id, user_id, currency, amount, rate_used, amount_yer,
+      collected_date, source, import_id, note, created_by
+    )
+    select
+      h.customer_id,
+      c.assigned_user_id,
+      h.currency,
+      (h.credit - h.prev_credit),
+      case h.currency when 'USD' then v_rate_usd when 'SAR' then v_rate_sar else 1 end,
+      round((h.credit - h.prev_credit)
+            * case h.currency when 'USD' then v_rate_usd when 'SAR' then v_rate_sar else 1 end, 2),
+      current_date, 'import', v_import_id,
+      'مشتقّة آلياً من زيادة الجانب الدائن في ملف: ' || p_file_name,
+      v_uid
+    from public.balance_history h
+    join public.customers c on c.id = h.customer_id
+    where h.import_id = v_import_id
+      -- [إصلاح #3] شرط صريح: الفرق موجب فعلاً (يتجنب فشل check (amount > 0))
+      and (h.credit - h.prev_credit) > 0
+      -- [إصلاح #1] الشرط المُصلَح لاشتقاق التحصيل:
+      --   الحالة أ: عميل له رصيد سابق بنفس العملة (السيناريو الاعتيادي)
+      --   الحالة ب: عميل قائم له رصيد بأي عملة، ويظهر بعملة جديدة لأول مرة
+      --             (prev_credit = 0 يثبت أنه ليس رصيد مفتوح قديم)
+      -- كلا الحالتين يستثنيان العميل الجديد كلياً (لا رصيد بأي عملة)
+      and (
+        -- الحالة أ: له رصيد سابق بنفس العملة
+        exists (
+          select 1 from public.balances b
+          where b.customer_id = h.customer_id and b.currency = h.currency
+        )
+        or
+        -- الحالة ب: له رصيد بعملة مختلفة (عميل قائم يُضاف له قسم عملة جديد)
+        (h.prev_credit = 0 and exists (
+          select 1 from public.balances b2
+          where b2.customer_id = h.customer_id
+        ))
+      );
+    get diagnostics v_collections = row_count;
+  end if;
+
+  -- تحديث الرصيد الحالي (upsert)
+  insert into public.balances(customer_id, currency, debit, credit, last_import_id)
+  select c.id, i.currency, i.debit, i.credit, v_import_id
+  from _in_bal i
+  join public.customers c on c.customer_number = i.customer_number
+  on conflict (customer_id, currency) do update set
+    debit          = excluded.debit,
+    credit         = excluded.credit,
+    last_import_id = excluded.last_import_id,
+    updated_at     = now();
+
+  update public.excel_imports
+  set rows_count = v_rows,
+      notes = format('صفوف: %s • عملاء جدد: %s • دفعات مشتقّة: %s', v_rows, v_new_customers, v_collections)
+  where id = v_import_id;
+
+  perform set_config('app.skip_audit', 'off', true);
+  perform public.write_activity_log('import', 'excel_imports', v_import_id::text, null,
+    jsonb_build_object('file_name', p_file_name, 'rows', v_rows,
+                       'new_customers', v_new_customers, 'collections', v_collections));
+
+  return jsonb_build_object(
+    'import_id', v_import_id,
+    'rows', v_rows,
+    'new_customers', v_new_customers,
+    'collections', v_collections
+  );
+end;
+$$;
+
+
+-- ############################################################################
+-- ### 20260901000002_notify_after_followup.sql
+-- ############################################################################
+
+-- =============================================================================
+-- Migration: 20260901000002_notify_after_followup.sql
+--
+-- الهدف: إنشاء دالة notify_after_followup تُنشئ/تُحدِّث التنبيهات تلقائياً
+-- فور إضافة متابعة، بصرف النظر عن دور المستخدم.
+--
+-- هذا يحل مشكلة: مسؤول التحصيل لا يملك صلاحية استدعاء generate_daily_notifications،
+-- فكانت التنبيهات تتأخر حتى التوليد اليومي الآلي.
+--
+-- ما تفعله الدالة:
+--  1) تزيل تنبيه 'stale' للعميل إن وُجد اليوم — لأن المتابعة الجديدة
+--     تعني أن العميل لم يعد متجاهلاً.
+--  2) تُنشئ تنبيه 'promise_today' إذا:
+--       • تاريخ المتابعة القادمة = اليوم
+--       • نتيجة التواصل تحتوي على كلمة الوعد المضبوطة في الإعدادات
+-- =============================================================================
+
+create or replace function public.notify_after_followup(
+  p_followup_id   uuid,
+  p_customer_id   uuid,
+  p_followup_date date,
+  p_next_date     date    default null,
+  p_result        text    default null
+)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_today          date := current_date;
+  v_s              public.settings%rowtype;
+  v_assigned_uid   uuid;
+begin
+  -- أي مستخدم مصادق عليه ونشط يستطيع استدعاء هذه الدالة
+  if not public.is_active_user() then
+    raise exception 'غير مصرّح: يجب تسجيل الدخول بحساب نشط';
+  end if;
+
+  -- جلب إعدادات النظام والمستخدم المكلّف بالعميل
+  select * into v_s from public.settings limit 1;
+
+  select assigned_user_id
+  into   v_assigned_uid
+  from   public.customers
+  where  id = p_customer_id and is_active;
+
+  -- -----------------------------------------------------------------------
+  -- 1) حذف تنبيه 'stale' لهذا العميل اليوم إن كانت المتابعة اليوم
+  --    (المتابعة الجديدة تُثبت أن العميل لم يُهمَل)
+  -- -----------------------------------------------------------------------
+  if p_followup_date >= v_today - coalesce(v_s.no_followup_days_limit, 14) then
+    delete from public.notifications
+    where  customer_id       = p_customer_id
+      and  notification_type = 'stale'
+      and  notification_date = v_today
+      and  status            = 'جديد';
+  end if;
+
+  -- -----------------------------------------------------------------------
+  -- 2) إنشاء تنبيه 'promise_today' إن توفّرت الشروط
+  -- -----------------------------------------------------------------------
+  if coalesce(v_s.alert_promise_enabled, true)
+     and p_next_date    = v_today
+     and p_result       ilike '%' || coalesce(v_s.promise_keyword, 'وعد') || '%'
+     and v_assigned_uid is not null
+  then
+    insert into public.notifications
+      (customer_id, user_id, notification_type, notification_date)
+    values
+      (p_customer_id, v_assigned_uid, 'promise_today', v_today)
+    on conflict (customer_id, notification_type, notification_date)
+    do nothing;
+  end if;
+
+end;
+$$;
+
+-- منح التنفيذ لكل مستخدم مصادق (الفحص الداخلي يضمن الأمان)
+revoke all on function public.notify_after_followup(uuid,uuid,date,date,text) from public, anon;
+grant execute on function public.notify_after_followup(uuid,uuid,date,date,text) to authenticated;
+
+
+-- ############################################################################
+-- ### 20260901000003_analytics_reports.sql
+-- ############################################################################
+
+-- ============================================================================
+-- ترقية ميزة التقارير التحليلية (V2 - Module 1: Analytics Reports)
+-- تشمل:
+--   1) تسجيل شاشة 'reports' في جدول app_screens وصلاحيات المستخدمين.
+--   2) دالة get_analytics_summary_kpis لحساب المؤشرات المالية والتحصيلية.
+--   3) دالة get_analytics_charts_data لحساب بيانات الرسوم البيانية الخمسة وتفاصيل أعلى المديونيات.
+-- ============================================================================
+
+-- ----------------------------------------------------------------------------
+-- 1) تسجيل شاشة التقارير في app_screens
+-- ----------------------------------------------------------------------------
+insert into public.app_screens (screen_key, screen_label, sort_order)
+values ('reports', 'التقارير التحليلية', 6)
+on conflict (screen_key) do update set
+  screen_label = excluded.screen_label,
+  sort_order = excluded.sort_order;
+
+-- إضافة الشاشة إلى allowed_screens لجميع المستخدمين الذين لا يمتلكونها
+update public.users
+set allowed_screens = array_append(allowed_screens, 'reports')
+where not ('reports' = any(coalesce(allowed_screens, array[]::text[])));
+
+-- ----------------------------------------------------------------------------
+-- 2) الدالة التجميعية الأولى: get_analytics_summary_kpis
+-- ----------------------------------------------------------------------------
+create or replace function public.get_analytics_summary_kpis(
+  p_start_date   date default null,
+  p_end_date     date default null,
+  p_user_id      uuid default null,
+  p_category_id  uuid default null,
+  p_currency     text default null
+)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public, pg_temp
+as $$
+declare
+  v_uid                      uuid;
+  v_is_active                boolean;
+  v_is_admin                 boolean;
+  v_is_accountant            boolean;
+  v_target_user_id           uuid;
+  v_my_cats                  uuid[];
+  v_rate_usd                 numeric(12,4);
+  v_rate_sar                 numeric(12,4);
+  v_ref_date                 date;
+  v_total_debt_yer           numeric(18,2) := 0;
+  v_total_collected_period_yer numeric(18,2) := 0;
+  v_active_count             integer := 0;
+  v_overdue_count            integer := 0;
+  v_settled_count            integer := 0;
+  v_team_collection_rate     numeric(6,2) := 0;
+begin
+  v_uid := auth.uid();
+
+  -- التحقق من حالة المستخدم
+  select (status = 'نشط') into v_is_active
+  from public.users
+  where id = v_uid;
+
+  if not v_is_active then
+    raise exception 'غير مصرّح: حساب المستخدم غير نشط أو غير مسجّل دخول';
+  end if;
+
+  v_is_admin := public.is_admin();
+  v_is_accountant := public.is_accountant();
+  v_my_cats := public.my_allowed_category_ids();
+  v_ref_date := coalesce(p_end_date, current_date);
+
+  -- عزل الصلاحيات: مسؤول التحصيل يرى بياناته فقط ويتم تجاهل p_user_id
+  if v_is_admin or v_is_accountant then
+    v_target_user_id := p_user_id;
+  else
+    v_target_user_id := v_uid;
+  end if;
+
+  -- قراءة أسعار الصرف
+  select coalesce(exchange_rate_usd, 0), coalesce(exchange_rate_sar, 0)
+  into v_rate_usd, v_rate_sar
+  from public.settings limit 1;
+
+  -- 1) حساب مديونيات العملاء وحالاتهم
+  with filtered_customers as (
+    select c.id, c.is_active, c.customer_category_id, c.assigned_user_id
+    from public.customers c
+    where (v_target_user_id is null or c.assigned_user_id = v_target_user_id)
+      and (p_category_id is null or c.customer_category_id = p_category_id)
+      and (
+        array_length(v_my_cats, 1) is null
+        or c.customer_category_id = any(v_my_cats)
+      )
+  ),
+  customer_debts as (
+    select
+      fc.id as customer_id,
+      fc.is_active,
+      case
+        when p_currency = 'USD' then
+          coalesce(sum(case when b.currency = 'USD' then (b.debit - b.credit) * v_rate_usd else 0 end), 0)
+        when p_currency = 'SAR' then
+          coalesce(sum(case when b.currency = 'SAR' then (b.debit - b.credit) * v_rate_sar else 0 end), 0)
+        when p_currency = 'YER' then
+          coalesce(sum(case when b.currency = 'YER' then (b.debit - b.credit) else 0 end), 0)
+        else
+          public.calc_total_due_yer(
+            coalesce(sum(case when b.currency = 'USD' then (b.debit - b.credit) else 0 end), 0),
+            coalesce(sum(case when b.currency = 'SAR' then (b.debit - b.credit) else 0 end), 0),
+            coalesce(sum(case when b.currency = 'YER' then (b.debit - b.credit) else 0 end), 0),
+            v_rate_usd,
+            v_rate_sar
+          )
+      end as customer_due_yer,
+      (dd.due_date + coalesce(dd.grace_period_1,0) + coalesce(dd.grace_period_2,0) + coalesce(dd.grace_period_3,0) - v_ref_date) as remaining_days
+    from filtered_customers fc
+    left join public.balances b on b.customer_id = fc.id
+    left join public.due_dates dd on dd.customer_id = fc.id
+    group by fc.id, fc.is_active, dd.due_date, dd.grace_period_1, dd.grace_period_2, dd.grace_period_3
+  )
+  select
+    coalesce(sum(customer_due_yer), 0),
+    count(*) filter (where customer_due_yer > 0 and (remaining_days is null or remaining_days >= 0) and is_active = true),
+    count(*) filter (where customer_due_yer > 0 and remaining_days < 0 and is_active = true),
+    count(*) filter (where customer_due_yer <= 0 or is_active = false)
+  into
+    v_total_debt_yer,
+    v_active_count,
+    v_overdue_count,
+    v_settled_count
+  from customer_debts;
+
+  -- 2) حساب المبالغ المحصلة في الفترة
+  select
+    coalesce(sum(case
+      when p_currency is null or p_currency = 'ALL' or p_currency = '' then col.amount_yer
+      when col.currency = p_currency then col.amount_yer
+      else 0
+    end), 0)
+  into v_total_collected_period_yer
+  from public.collections col
+  join public.customers c on c.id = col.customer_id
+  where (v_target_user_id is null or col.user_id = v_target_user_id or c.assigned_user_id = v_target_user_id)
+    and (p_category_id is null or c.customer_category_id = p_category_id)
+    and (
+      array_length(v_my_cats, 1) is null
+      or c.customer_category_id = any(v_my_cats)
+    )
+    and (p_start_date is null or col.collected_date >= p_start_date)
+    and (p_end_date is null or col.collected_date <= p_end_date);
+
+  -- 3) حساب نسبة التحصيل العام
+  if (v_total_collected_period_yer + v_total_debt_yer) > 0 then
+    v_team_collection_rate := round(
+      (v_total_collected_period_yer / (v_total_collected_period_yer + v_total_debt_yer) * 100)::numeric,
+      2
+    );
+  else
+    v_team_collection_rate := 0;
+  end if;
+
+  return jsonb_build_object(
+    'total_debt_yer', coalesce(v_total_debt_yer, 0),
+    'total_collected_period_yer', coalesce(v_total_collected_period_yer, 0),
+    'active_customers_count', coalesce(v_active_count, 0),
+    'overdue_customers_count', coalesce(v_overdue_count, 0),
+    'settled_customers_count', coalesce(v_settled_count, 0),
+    'team_collection_rate', coalesce(v_team_collection_rate, 0)
+  );
+end;
+$$;
+
+-- ----------------------------------------------------------------------------
+-- 3) الدالة التجميعية الثانية: get_analytics_charts_data
+-- ----------------------------------------------------------------------------
+create or replace function public.get_analytics_charts_data(
+  p_start_date   date default null,
+  p_end_date     date default null,
+  p_user_id      uuid default null,
+  p_category_id  uuid default null,
+  p_currency     text default null
+)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public, pg_temp
+as $$
+declare
+  v_uid                      uuid;
+  v_is_active                boolean;
+  v_is_admin                 boolean;
+  v_is_accountant            boolean;
+  v_target_user_id           uuid;
+  v_my_cats                  uuid[];
+  v_rate_usd                 numeric(12,4);
+  v_rate_sar                 numeric(12,4);
+  v_ref_date                 date;
+  v_total_debt_all           numeric(18,2) := 0;
+  v_debt_by_currency         jsonb;
+  v_customers_by_status      jsonb;
+  v_collector_performance    jsonb;
+  v_monthly_trend            jsonb;
+  v_category_debt            jsonb;
+  v_top_10_debtors           jsonb;
+  v_start_month              date;
+  v_end_month                date;
+begin
+  v_uid := auth.uid();
+
+  select (status = 'نشط') into v_is_active
+  from public.users
+  where id = v_uid;
+
+  if not v_is_active then
+    raise exception 'غير مصرّح: حساب المستخدم غير نشط أو غير مسجّل دخول';
+  end if;
+
+  v_is_admin := public.is_admin();
+  v_is_accountant := public.is_accountant();
+  v_my_cats := public.my_allowed_category_ids();
+  v_ref_date := coalesce(p_end_date, current_date);
+
+  -- عزل الصلاحيات: مسؤول التحصيل يرى بياناته فقط ويتم تجاهل p_user_id
+  if v_is_admin or v_is_accountant then
+    v_target_user_id := p_user_id;
+  else
+    v_target_user_id := v_uid;
+  end if;
+
+  -- قراءة أسعار الصرف
+  select coalesce(exchange_rate_usd, 0), coalesce(exchange_rate_sar, 0)
+  into v_rate_usd, v_rate_sar
+  from public.settings limit 1;
+
+  -- إجمالي المديونية الكلية بالريال لاستخدامها في حساب النسب المئوية
+  select coalesce(sum(
+    case
+      when p_currency = 'USD' then (b.debit - b.credit) * v_rate_usd
+      when p_currency = 'SAR' then (b.debit - b.credit) * v_rate_sar
+      when p_currency = 'YER' then (b.debit - b.credit)
+      else
+        case
+          when b.currency = 'USD' then (b.debit - b.credit) * v_rate_usd
+          when b.currency = 'SAR' then (b.debit - b.credit) * v_rate_sar
+          else (b.debit - b.credit)
+        end
+    end
+  ), 0)
+  into v_total_debt_all
+  from public.customers c
+  join public.balances b on b.customer_id = c.id
+  where (v_target_user_id is null or c.assigned_user_id = v_target_user_id)
+    and (p_category_id is null or c.customer_category_id = p_category_id)
+    and (
+      array_length(v_my_cats, 1) is null
+      or c.customer_category_id = any(v_my_cats)
+    )
+    and (p_currency is null or p_currency = 'ALL' or p_currency = '' or b.currency = p_currency);
+
+  -- 1) توزيع المديونيات حسب العملة (YER, USD, SAR)
+  with curr_data as (
+    select
+      b.currency,
+      coalesce(sum(b.debit - b.credit), 0) as amount_orig,
+      coalesce(sum(
+        case
+          when b.currency = 'USD' then (b.debit - b.credit) * v_rate_usd
+          when b.currency = 'SAR' then (b.debit - b.credit) * v_rate_sar
+          else (b.debit - b.credit)
+        end
+      ), 0) as amount_yer
+    from public.customers c
+    join public.balances b on b.customer_id = c.id
+    where (v_target_user_id is null or c.assigned_user_id = v_target_user_id)
+      and (p_category_id is null or c.customer_category_id = p_category_id)
+      and (
+        array_length(v_my_cats, 1) is null
+        or c.customer_category_id = any(v_my_cats)
+      )
+      and (p_currency is null or p_currency = 'ALL' or p_currency = '' or b.currency = p_currency)
+    group by b.currency
+  )
+  select coalesce(jsonb_agg(
+    jsonb_build_object(
+      'currency', c_name.curr,
+      'currency_name', c_name.label,
+      'amount_original', coalesce(cd.amount_orig, 0),
+      'amount_yer', coalesce(cd.amount_yer, 0),
+      'percentage', case
+        when v_total_debt_all > 0 then round((coalesce(cd.amount_yer, 0) / v_total_debt_all * 100)::numeric, 2)
+        else 0
+      end
+    ) order by case c_name.curr when 'YER' then 1 when 'USD' then 2 when 'SAR' then 3 else 4 end
+  ), '[]'::jsonb)
+  into v_debt_by_currency
+  from (
+    values
+      ('YER'::text, 'ريال يمني'::text),
+      ('USD'::text, 'دولار أمريكي'::text),
+      ('SAR'::text, 'ريال سعودي'::text)
+  ) as c_name(curr, label)
+  left join curr_data cd on cd.currency = c_name.curr;
+
+  -- 2) توزيع العملاء حسب الحالة (نشط، متعثر، مسدد)
+  with cust_calc as (
+    select
+      c.id,
+      c.is_active,
+      coalesce(public.calc_total_due_yer(
+        coalesce(sum(case when b.currency = 'USD' then (b.debit - b.credit) else 0 end), 0),
+        coalesce(sum(case when b.currency = 'SAR' then (b.debit - b.credit) else 0 end), 0),
+        coalesce(sum(case when b.currency = 'YER' then (b.debit - b.credit) else 0 end), 0),
+        v_rate_usd,
+        v_rate_sar
+      ), 0) as total_due_yer,
+      (dd.due_date + coalesce(dd.grace_period_1,0) + coalesce(dd.grace_period_2,0) + coalesce(dd.grace_period_3,0) - v_ref_date) as remaining_days
+    from public.customers c
+    left join public.balances b on b.customer_id = c.id
+    left join public.due_dates dd on dd.customer_id = c.id
+    where (v_target_user_id is null or c.assigned_user_id = v_target_user_id)
+      and (p_category_id is null or c.customer_category_id = p_category_id)
+      and (
+        array_length(v_my_cats, 1) is null
+        or c.customer_category_id = any(v_my_cats)
+      )
+    group by c.id, c.is_active, dd.due_date, dd.grace_period_1, dd.grace_period_2, dd.grace_period_3
+  ),
+  status_counts as (
+    select
+      count(*) as total_custs,
+      count(*) filter (where total_due_yer > 0 and (remaining_days is null or remaining_days >= 0) and is_active = true) as active_cnt,
+      count(*) filter (where total_due_yer > 0 and remaining_days < 0 and is_active = true) as overdue_cnt,
+      count(*) filter (where total_due_yer <= 0 or is_active = false) as settled_cnt
+    from cust_calc
+  )
+  select jsonb_build_array(
+    jsonb_build_object(
+      'status', 'active',
+      'status_label', 'عملاء نشطون',
+      'count', sc.active_cnt,
+      'percentage', case when sc.total_custs > 0 then round((sc.active_cnt::numeric / sc.total_custs * 100)::numeric, 2) else 0 end
+    ),
+    jsonb_build_object(
+      'status', 'overdue',
+      'status_label', 'عملاء متعثرون',
+      'count', sc.overdue_cnt,
+      'percentage', case when sc.total_custs > 0 then round((sc.overdue_cnt::numeric / sc.total_custs * 100)::numeric, 2) else 0 end
+    ),
+    jsonb_build_object(
+      'status', 'settled',
+      'status_label', 'عملاء مسددون',
+      'count', sc.settled_cnt,
+      'percentage', case when sc.total_custs > 0 then round((sc.settled_cnt::numeric / sc.total_custs * 100)::numeric, 2) else 0 end
+    )
+  )
+  into v_customers_by_status
+  from status_counts sc;
+
+  -- 3) أداء مسؤولي التحصيل
+  with collector_list as (
+    select distinct u.id as user_id, u.full_name as collector_name
+    from public.users u
+    where (v_target_user_id is null or u.id = v_target_user_id)
+      and (
+        exists (select 1 from public.customers c where c.assigned_user_id = u.id)
+        or exists (select 1 from public.collections col where col.user_id = u.id)
+        or exists (select 1 from public.roles r where r.id = u.role_id and r.name_role in ('مسؤول التحصيل', 'مستخدم مخصص'))
+      )
+  ),
+  collector_debts as (
+    select
+      c.assigned_user_id as user_id,
+      count(distinct c.id) as customer_count,
+      coalesce(sum(
+        case
+          when p_currency = 'USD' then (b.debit - b.credit) * v_rate_usd
+          when p_currency = 'SAR' then (b.debit - b.credit) * v_rate_sar
+          when p_currency = 'YER' then (b.debit - b.credit)
+          else
+            case
+              when b.currency = 'USD' then (b.debit - b.credit) * v_rate_usd
+              when b.currency = 'SAR' then (b.debit - b.credit) * v_rate_sar
+              else (b.debit - b.credit)
+            end
+        end
+      ), 0) as total_due_yer
+    from public.customers c
+    left join public.balances b on b.customer_id = c.id
+    where (v_target_user_id is null or c.assigned_user_id = v_target_user_id)
+      and (p_category_id is null or c.customer_category_id = p_category_id)
+      and (
+        array_length(v_my_cats, 1) is null
+        or c.customer_category_id = any(v_my_cats)
+      )
+      and (p_currency is null or p_currency = 'ALL' or p_currency = '' or b.currency = p_currency)
+    group by c.assigned_user_id
+  ),
+  collector_collections as (
+    select
+      coalesce(col.user_id, c.assigned_user_id) as user_id,
+      coalesce(sum(case
+        when p_currency is null or p_currency = 'ALL' or p_currency = '' then col.amount_yer
+        when col.currency = p_currency then col.amount_yer
+        else 0
+      end), 0) as total_collected_yer
+    from public.collections col
+    join public.customers c on c.id = col.customer_id
+    where (v_target_user_id is null or col.user_id = v_target_user_id or c.assigned_user_id = v_target_user_id)
+      and (p_category_id is null or c.customer_category_id = p_category_id)
+      and (
+        array_length(v_my_cats, 1) is null
+        or c.customer_category_id = any(v_my_cats)
+      )
+      and (p_start_date is null or col.collected_date >= p_start_date)
+      and (p_end_date is null or col.collected_date <= p_end_date)
+    group by coalesce(col.user_id, c.assigned_user_id)
+  )
+  select coalesce(jsonb_agg(
+    jsonb_build_object(
+      'user_id', cl.user_id,
+      'collector_name', cl.collector_name,
+      'total_due_yer', coalesce(cd.total_due_yer, 0),
+      'total_collected_yer', coalesce(cc.total_collected_yer, 0),
+      'customer_count', coalesce(cd.customer_count, 0),
+      'collection_rate', case
+        when (coalesce(cc.total_collected_yer, 0) + coalesce(cd.total_due_yer, 0)) > 0 then
+          round((coalesce(cc.total_collected_yer, 0) / (coalesce(cc.total_collected_yer, 0) + coalesce(cd.total_due_yer, 0)) * 100)::numeric, 2)
+        else 0
+      end
+    ) order by coalesce(cc.total_collected_yer, 0) desc, coalesce(cd.total_due_yer, 0) desc
+  ), '[]'::jsonb)
+  into v_collector_performance
+  from collector_list cl
+  left join collector_debts cd on cd.user_id = cl.user_id
+  left join collector_collections cc on cc.user_id = cl.user_id;
+
+  -- 4) تطور التحصيل الشهري (آخر 6 أشهر)
+  v_end_month := date_trunc('month', coalesce(p_end_date, current_date))::date;
+  v_start_month := (v_end_month - interval '5 months')::date;
+
+  with months as (
+    select generate_series(v_start_month, v_end_month, '1 month'::interval)::date as m_start
+  ),
+  monthly_data as (
+    select
+      to_char(m.m_start, 'YYYY-MM') as month_str,
+      case extract(month from m.m_start)
+        when 1 then 'يناير'
+        when 2 then 'فبراير'
+        when 3 then 'مارس'
+        when 4 then 'أبريل'
+        when 5 then 'مايو'
+        when 6 then 'يونيو'
+        when 7 then 'يوليو'
+        when 8 then 'أغسطس'
+        when 9 then 'سبتمبر'
+        when 10 then 'أكتوبر'
+        when 11 then 'نوفمبر'
+        when 12 then 'ديسمبر'
+      end || ' ' || to_char(m.m_start, 'YYYY') as month_lbl,
+      coalesce(sum(
+        case
+          when p_currency is null or p_currency = 'ALL' or p_currency = '' then col.amount_yer
+          when col.currency = p_currency then col.amount_yer
+          else 0
+        end
+      ), 0) as m_collected_yer
+    from months m
+    left join public.collections col on
+      col.collected_date >= m.m_start
+      and col.collected_date < (m.m_start + interval '1 month')::date
+      and (v_target_user_id is null or col.user_id = v_target_user_id)
+    group by m.m_start
+    order by m.m_start
+  )
+  select coalesce(jsonb_agg(
+    jsonb_build_object(
+      'month', md.month_str,
+      'month_label', md.month_lbl,
+      'collected_yer', md.m_collected_yer,
+      'target_or_due_yer', v_total_debt_all,
+      'collection_rate', case
+        when (md.m_collected_yer + v_total_debt_all) > 0 then
+          round((md.m_collected_yer / (md.m_collected_yer + v_total_debt_all) * 100)::numeric, 2)
+        else 0
+      end
+    )
+  ), '[]'::jsonb)
+  into v_monthly_trend
+  from monthly_data md;
+
+  -- 5) توزيع المديونيات حسب فئة العميل
+  with cat_debts as (
+    select
+      c.customer_category_id as cat_id,
+      coalesce(cat.category_name, 'بدون فئة') as cat_name,
+      coalesce(cat.color, '#64748B') as cat_color,
+      count(distinct c.id) as cust_cnt,
+      coalesce(sum(
+        case
+          when p_currency = 'USD' then (b.debit - b.credit) * v_rate_usd
+          when p_currency = 'SAR' then (b.debit - b.credit) * v_rate_sar
+          when p_currency = 'YER' then (b.debit - b.credit)
+          else
+            case
+              when b.currency = 'USD' then (b.debit - b.credit) * v_rate_usd
+              when b.currency = 'SAR' then (b.debit - b.credit) * v_rate_sar
+              else (b.debit - b.credit)
+            end
+        end
+      ), 0) as cat_debt_yer
+    from public.customers c
+    left join public.customer_categories cat on cat.id = c.customer_category_id
+    left join public.balances b on b.customer_id = c.id
+    where (v_target_user_id is null or c.assigned_user_id = v_target_user_id)
+      and (p_category_id is null or c.customer_category_id = p_category_id)
+      and (
+        array_length(v_my_cats, 1) is null
+        or c.customer_category_id = any(v_my_cats)
+      )
+      and (p_currency is null or p_currency = 'ALL' or p_currency = '' or b.currency = p_currency)
+    group by c.customer_category_id, cat.category_name, cat.color
+  )
+  select coalesce(jsonb_agg(
+    jsonb_build_object(
+      'category_id', cd.cat_id,
+      'category_name', cd.cat_name,
+      'category_color', cd.cat_color,
+      'total_debt_yer', cd.cat_debt_yer,
+      'customer_count', cd.cust_cnt,
+      'percentage', case
+        when v_total_debt_all > 0 then round((cd.cat_debt_yer / v_total_debt_all * 100)::numeric, 2)
+        else 0
+      end
+    ) order by cd.cat_debt_yer desc
+  ), '[]'::jsonb)
+  into v_category_debt
+  from cat_debts cd;
+
+  -- 6) أعلى 10 عملاء مديونية (التركيز الائتماني)
+  with top_debtors_calc as (
+    select
+      c.id as cust_id,
+      c.customer_number as cust_num,
+      c.customer_name as cust_name,
+      c.is_active,
+      cat.category_name as cat_name,
+      cat.color as cat_color,
+      u.full_name as assigned_name,
+      (dd.due_date + coalesce(dd.grace_period_1,0) + coalesce(dd.grace_period_2,0) + coalesce(dd.grace_period_3,0) - v_ref_date) as rem_days,
+      coalesce(public.calc_total_due_yer(
+        coalesce(sum(case when b.currency = 'USD' then (b.debit - b.credit) else 0 end), 0),
+        coalesce(sum(case when b.currency = 'SAR' then (b.debit - b.credit) else 0 end), 0),
+        coalesce(sum(case when b.currency = 'YER' then (b.debit - b.credit) else 0 end), 0),
+        v_rate_usd,
+        v_rate_sar
+      ), 0) as due_yer
+    from public.customers c
+    left join public.customer_categories cat on cat.id = c.customer_category_id
+    left join public.users u on u.id = c.assigned_user_id
+    left join public.balances b on b.customer_id = c.id
+    left join public.due_dates dd on dd.customer_id = c.id
+    where (v_target_user_id is null or c.assigned_user_id = v_target_user_id)
+      and (p_category_id is null or c.customer_category_id = p_category_id)
+      and (
+        array_length(v_my_cats, 1) is null
+        or c.customer_category_id = any(v_my_cats)
+      )
+    group by c.id, c.customer_number, c.customer_name, c.is_active, cat.category_name, cat.color, u.full_name, dd.due_date, dd.grace_period_1, dd.grace_period_2, dd.grace_period_3
+    having coalesce(public.calc_total_due_yer(
+      coalesce(sum(case when b.currency = 'USD' then (b.debit - b.credit) else 0 end), 0),
+      coalesce(sum(case when b.currency = 'SAR' then (b.debit - b.credit) else 0 end), 0),
+      coalesce(sum(case when b.currency = 'YER' then (b.debit - b.credit) else 0 end), 0),
+      v_rate_usd,
+      v_rate_sar
+    ), 0) > 0
+    order by due_yer desc
+    limit 10
+  )
+  select coalesce(jsonb_agg(
+    jsonb_build_object(
+      'customer_id', t.cust_id,
+      'customer_number', t.cust_num,
+      'customer_name', t.cust_name,
+      'category_name', t.cat_name,
+      'category_color', t.cat_color,
+      'assigned_user_name', t.assigned_name,
+      'total_due_yer', t.due_yer,
+      'debt_percentage', case
+        when v_total_debt_all > 0 then round((t.due_yer / v_total_debt_all * 100)::numeric, 2)
+        else 0
+      end,
+      'status', case
+        when t.due_yer <= 0 or t.is_active = false then 'settled'
+        when t.rem_days < 0 then 'overdue'
+        else 'active'
+      end
+    )
+  ), '[]'::jsonb)
+  into v_top_10_debtors
+  from top_debtors_calc t;
+
+  return jsonb_build_object(
+    'debt_by_currency', coalesce(v_debt_by_currency, '[]'::jsonb),
+    'customers_by_status', coalesce(v_customers_by_status, '[]'::jsonb),
+    'collector_performance', coalesce(v_collector_performance, '[]'::jsonb),
+    'monthly_collection_trend', coalesce(v_monthly_trend, '[]'::jsonb),
+    'category_debt', coalesce(v_category_debt, '[]'::jsonb),
+    'top_10_debtors', coalesce(v_top_10_debtors, '[]'::jsonb)
+  );
+end;
+$$;
+
+
+-- ############################################################################
+-- ### 20260901000004_personal_tiers.sql
+-- ############################################################################
+
+-- ============================================================================
+-- ميزة التصنيف الشخصي للمحصل (أ / ب / ج / د) — V2 Module 4
+--
+-- هذا الملف يُنشئ:
+--  1) جدول collector_tier_settings: مسميات وألوان الفئات الشخصية لكل مستخدم.
+--  2) جدول customer_personal_assignments: تعيين كل عميل لفئة معينة لدى المستخدم.
+--  3) سياسات RLS لعزل الخصوصية بالكامل (لا يرى المستخدم تصنيفات غيره).
+--  4) دوال الـ RPC:
+--     - get_or_init_user_tiers(): تهيئة الفئات الأربع الافتراضية إن لم تكن موجودة.
+--     - set_customer_personal_tier(): تعيين فئة العميل بنقرة واحدة (Upsert).
+-- ============================================================================
+
+-- ---------------------------------------------------------------- 1. جدول إعدادات ومسميات الفئات الشخصية
+create table if not exists public.collector_tier_settings (
+  id          uuid primary key default gen_random_uuid(),
+  user_id     uuid not null references public.users(id) on delete cascade,
+  tier_key    text not null check (tier_key in ('A', 'B', 'C', 'D')),
+  tier_name   text not null,
+  color       text not null default '#6B7280',
+  sort_order  integer not null default 0,
+  created_at  timestamptz not null default now(),
+  updated_at  timestamptz not null default now(),
+  unique (user_id, tier_key)
+);
+
+-- ---------------------------------------------------------------- 2. جدول تعيينات العملاء للفئات الشخصية
+create table if not exists public.customer_personal_assignments (
+  id           uuid primary key default gen_random_uuid(),
+  user_id      uuid not null references public.users(id) on delete cascade,
+  customer_id  uuid not null references public.customers(id) on delete cascade,
+  tier_key     text not null check (tier_key in ('A', 'B', 'C', 'D')),
+  created_at   timestamptz not null default now(),
+  updated_at   timestamptz not null default now(),
+  unique (user_id, customer_id)
+);
+
+-- فهارس الأداء
+create index if not exists idx_tier_settings_user on public.collector_tier_settings(user_id);
+create index if not exists idx_personal_assignments_user on public.customer_personal_assignments(user_id);
+create index if not exists idx_personal_assignments_user_cust on public.customer_personal_assignments(user_id, customer_id);
+
+-- ---------------------------------------------------------------- 3. سياسات الحماية على مستوى الصف (RLS)
+alter table public.collector_tier_settings enable row level security;
+alter table public.customer_personal_assignments enable row level security;
+
+-- كل مستخدم يصل فقط لإعداداته وتصنيفاته الخاصة
+create policy collector_tier_settings_all on public.collector_tier_settings
+  for all
+  using (auth.uid() = user_id)
+  with check (auth.uid() = user_id);
+
+create policy customer_personal_assignments_all on public.customer_personal_assignments
+  for all
+  using (auth.uid() = user_id)
+  with check (auth.uid() = user_id);
+
+-- ---------------------------------------------------------------- 4. دوال الـ RPC
+
+-- أ. دالة جلب أو تهيئة الفئات الأربع الافتراضية للمستخدم الحالي
+create or replace function public.get_or_init_user_tiers()
+returns setof public.collector_tier_settings
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_user_id uuid := auth.uid();
+  v_count integer;
+begin
+  if v_user_id is null then
+    raise exception 'يجب تسجيل الدخول لاستدعاء هذه الدالة';
+  end if;
+
+  select count(*) into v_count
+  from public.collector_tier_settings
+  where user_id = v_user_id;
+
+  if v_count = 0 then
+    insert into public.collector_tier_settings (user_id, tier_key, tier_name, color, sort_order)
+    values
+      (v_user_id, 'A', 'فئة أ (أولوية عالية)', '#EF4444', 1),
+      (v_user_id, 'B', 'فئة ب (متابعة نشطة)', '#F59E0B', 2),
+      (v_user_id, 'C', 'فئة ج (وعود ومستقر)', '#3B82F6', 3),
+      (v_user_id, 'D', 'فئة د (عام / غير مصنف)', '#6B7280', 4)
+    on conflict (user_id, tier_key) do nothing;
+  end if;
+
+  return query
+  select *
+  from public.collector_tier_settings
+  where user_id = v_user_id
+  order by sort_order asc, tier_key asc;
+end;
+$$;
+
+-- ب. دالة تعيين أو تعديل فئة العميل الشخصية بنقرة واحدة (Upsert)
+create or replace function public.set_customer_personal_tier(
+  p_customer_id uuid,
+  p_tier_key text
+)
+returns public.customer_personal_assignments
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_user_id uuid := auth.uid();
+  v_result public.customer_personal_assignments;
+begin
+  if v_user_id is null then
+    raise exception 'يجب تسجيل الدخول لتعيين الفئة الشخصية';
+  end if;
+
+  if p_tier_key not in ('A', 'B', 'C', 'D') then
+    raise exception 'مفتاح الفئة غير صالح. القيم المسموحة: A, B, C, D';
+  end if;
+
+  insert into public.customer_personal_assignments (user_id, customer_id, tier_key, updated_at)
+  values (v_user_id, p_customer_id, p_tier_key, now())
+  on conflict (user_id, customer_id)
+  do update set
+    tier_key = excluded.tier_key,
+    updated_at = now()
+  returning * into v_result;
+
+  return v_result;
+end;
+$$;
+
+
+-- ############################################################################
+-- ### 20260901000005_custom_reminders.sql
+-- ############################################################################
+
+-- ============================================================================
+-- ميزة زر «ذكرني» والتذكيرات الحرة المخصصة — V2 Module 3
+--
+-- هذا الملف يُنشئ:
+--  1) جدول custom_reminders: تخزين التذكيرات والمهام الحرة لكل مستخدم.
+--  2) سياسات RLS لعزل الخصوصية بالكامل (لا يرى المستخدم إلا تذكيراته).
+--  3) دوال الـ RPC:
+--     - create_custom_reminder(): إنشاء تذكير سريع مع التحقق.
+--     - toggle_reminder_status(): تبديل حالة الإنجاز (مكتمل / غير مكتمل).
+--     - snooze_reminder(): تأجيل موعد التذكير بعدد محدد من الأيام.
+-- ============================================================================
+
+-- ---------------------------------------------------------------- 1. جدول التذكيرات المخصصة
+create table if not exists public.custom_reminders (
+  id              uuid primary key default gen_random_uuid(),
+  user_id         uuid not null references public.users(id) on delete cascade,
+  customer_id     uuid references public.customers(id) on delete cascade,
+  title           text not null,
+  notes           text,
+  due_date        date not null,
+  due_time        time,
+  priority        text not null default 'normal' check (priority in ('low', 'normal', 'high', 'urgent')),
+  is_completed    boolean not null default false,
+  completed_at    timestamptz,
+  snoozed_until   date,
+  created_at      timestamptz not null default now(),
+  updated_at      timestamptz not null default now()
+);
+
+-- فهارس الأداء السريع
+create index if not exists idx_custom_reminders_user on public.custom_reminders(user_id);
+create index if not exists idx_custom_reminders_user_date on public.custom_reminders(user_id, due_date);
+create index if not exists idx_custom_reminders_customer on public.custom_reminders(customer_id);
+create index if not exists idx_custom_reminders_status on public.custom_reminders(user_id, is_completed);
+
+-- ---------------------------------------------------------------- 2. سياسات الحماية على مستوى الصف (RLS)
+alter table public.custom_reminders enable row level security;
+
+create policy custom_reminders_user_policy on public.custom_reminders
+  for all
+  using (auth.uid() = user_id)
+  with check (auth.uid() = user_id);
+
+-- ---------------------------------------------------------------- 3. دوال الـ RPC
+
+-- أ. دالة إنشاء تذكير مخصص
+create or replace function public.create_custom_reminder(
+  p_customer_id uuid,
+  p_title text,
+  p_notes text,
+  p_due_date date,
+  p_due_time time default null,
+  p_priority text default 'normal'
+)
+returns public.custom_reminders
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_user_id uuid := auth.uid();
+  v_res public.custom_reminders;
+begin
+  if v_user_id is null then
+    raise exception 'يجب تسجيل الدخول لإنشاء تذكير';
+  end if;
+  if coalesce(trim(p_title), '') = '' then
+    raise exception 'عنوان التذكير مطلوب';
+  end if;
+  if p_due_date is null then
+    raise exception 'تاريخ التذكير مطلوب';
+  end if;
+
+  insert into public.custom_reminders (
+    user_id, customer_id, title, notes, due_date, due_time, priority
+  ) values (
+    v_user_id, p_customer_id, trim(p_title), p_notes, p_due_date, p_due_time, coalesce(p_priority, 'normal')
+  )
+  returning * into v_res;
+
+  return v_res;
+end;
+$$;
+
+-- ب. دالة تبديل حالة إنجاز التذكير (Toggle Status)
+create or replace function public.toggle_reminder_status(
+  p_reminder_id uuid,
+  p_is_completed boolean
+)
+returns public.custom_reminders
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_user_id uuid := auth.uid();
+  v_res public.custom_reminders;
+begin
+  if v_user_id is null then
+    raise exception 'غير مصرح';
+  end if;
+
+  update public.custom_reminders
+  set
+    is_completed = p_is_completed,
+    completed_at = case when p_is_completed then now() else null end,
+    updated_at = now()
+  where id = p_reminder_id and user_id = v_user_id
+  returning * into v_res;
+
+  if v_res.id is null then
+    raise exception 'التذكير غير موجود أو لا تملك صلاحية تعديله';
+  end if;
+
+  return v_res;
+end;
+$$;
+
+-- ج. دالة تأجيل موعد التذكير (Snooze)
+create or replace function public.snooze_reminder(
+  p_reminder_id uuid,
+  p_days_to_add integer
+)
+returns public.custom_reminders
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_user_id uuid := auth.uid();
+  v_res public.custom_reminders;
+begin
+  if v_user_id is null then
+    raise exception 'غير مصرح';
+  end if;
+  if p_days_to_add <= 0 then
+    raise exception 'عدد أيام التأجيل يجب أن يكون أكبر من الصفر';
+  end if;
+
+  update public.custom_reminders
+  set
+    due_date = current_date + p_days_to_add,
+    snoozed_until = current_date + p_days_to_add,
+    is_completed = false,
+    completed_at = null,
+    updated_at = now()
+  where id = p_reminder_id and user_id = v_user_id
+  returning * into v_res;
+
+  if v_res.id is null then
+    raise exception 'التذكير غير موجود أو لا تملك صلاحية تعديله';
+  end if;
+
+  return v_res;
+end;
+$$;
+
+
+-- ############################################################################
+-- ### 20260901000006_system_backups.sql
+-- ############################################################################
+
+-- ============================================================================
+-- مركز النسخ الاحتياطي والاستعادة من الواجهة — V2 Module 4
+--
+-- هذا الملف يُنشئ:
+--  1) جدول system_backups: سجل لكافة النسخ الاحتياطية (اليدوية، المجدولة، ونقاط الأمان).
+--  2) سياسات RLS وقواعد الأمان: قصر الوصول والإدارة حصرياً على مدير النظام.
+--  3) مستودع التخزين السحابي (backups bucket) وسياسات الحماية.
+--  4) دالة generate_system_backup_json(): تجميع كافة جداول V1 و V2 في حزمة JSON
+--     موحدة ومشفرة بالبصمة الرقمية (SHA-256) وتسجيل العملية في سجل التدقيق.
+--  5) دالة delete_system_backup_record(): لحذف سجل نسخة احتياطية من قبل المدير.
+--  6) دالة validate_system_backup_payload(): فحص ومقارنة حزمة النسخة قبل الاستعادة.
+--  7) دالة restore_system_backup(): استعادة ذرية شاملة مع أخذ نقطة أمان آلية.
+-- ============================================================================
+
+create extension if not exists pgcrypto;
+
+-- ---------------------------------------------------------------- 1. جدول سجل النسخ الاحتياطية
+create table if not exists public.system_backups (
+  id                  uuid primary key default gen_random_uuid(),
+  backup_name         text not null,
+  file_name           text not null,
+  file_size_bytes     bigint not null default 0,
+  storage_path        text,
+  backup_type         text not null default 'manual' check (backup_type in ('manual', 'auto_scheduled', 'safety_pre_restore')),
+  checksum_sha256     text not null,
+  table_counts        jsonb not null default '{}'::jsonb,
+  notes               text,
+  created_by          uuid references public.users(id) on delete set null,
+  created_at          timestamptz not null default now()
+);
+
+-- فهارس الأداء السريع
+create index if not exists idx_system_backups_created_at on public.system_backups(created_at desc);
+create index if not exists idx_system_backups_type on public.system_backups(backup_type);
+
+-- ---------------------------------------------------------------- 2. سياسات الحماية على مستوى الصف (RLS)
+alter table public.system_backups enable row level security;
+
+-- صلاحية كاملة لمدير النظام فقط
+drop policy if exists system_backups_admin_all on public.system_backups;
+create policy system_backups_admin_all on public.system_backups
+  for all
+  using (public.is_admin())
+  with check (public.is_admin());
+
+-- ---------------------------------------------------------------- 3. مستودع التخزين السحابي المحمي
+insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+values ('backups', 'backups', false, 104857600, array['application/json', 'application/gzip', 'application/octet-stream'])
+on conflict (id) do update set
+  public = false,
+  file_size_limit = 104857600;
+
+-- سياسات RLS على مستودع التخزين
+drop policy if exists backups_bucket_admin_select on storage.objects;
+create policy backups_bucket_admin_select on storage.objects
+  for select
+  using (bucket_id = 'backups' and public.is_admin());
+
+drop policy if exists backups_bucket_admin_insert on storage.objects;
+create policy backups_bucket_admin_insert on storage.objects
+  for insert
+  with check (bucket_id = 'backups' and public.is_admin());
+
+drop policy if exists backups_bucket_admin_delete on storage.objects;
+create policy backups_bucket_admin_delete on storage.objects
+  for delete
+  using (bucket_id = 'backups' and public.is_admin());
+
+-- ---------------------------------------------------------------- 4. دوال الـ RPC للنسخ الاحتياطي
+
+-- أ. دالة توليد حزمة النسخة الاحتياطية الشاملة
+create or replace function public.generate_system_backup_json(
+  p_backup_type text default 'manual',
+  p_notes text default null
+)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_user_id uuid := auth.uid();
+  v_username text;
+  v_payload jsonb;
+  v_tables jsonb;
+  v_counts jsonb;
+  v_backup_id uuid := gen_random_uuid();
+  v_backup_name text;
+  v_file_name text;
+  v_checksum text;
+  v_now_str text := to_char(now() at time zone 'UTC', 'YYYYMMDD_HH24MISS');
+begin
+  -- التحقق من صلاحية المدير
+  if not (public.is_active_user() and public.is_admin()) then
+    raise exception 'غير مصرح: عملية النسخ الاحتياطي محصورة بمدير النظام فقط';
+  end if;
+
+  select username into v_username from public.users where id = v_user_id;
+
+  v_backup_name := case 
+    when p_backup_type = 'safety_pre_restore' then 'نقطة أمان تلقائية قبل الاستعادة (' || v_now_str || ')'
+    when p_backup_type = 'auto_scheduled' then 'نسخة مجدولة آلية (' || v_now_str || ')'
+    else 'نسخة احتياطية يدوية (' || v_now_str || ')'
+  end;
+
+  v_file_name := 'backup_' || v_now_str || '_' || coalesce(p_backup_type, 'manual') || '.json';
+
+  -- استخراج كافة الجداول كـ JSON
+  v_tables := jsonb_build_object(
+    'settings', (select coalesce(jsonb_agg(to_jsonb(t)), '[]'::jsonb) from public.settings t),
+    'customer_categories', (select coalesce(jsonb_agg(to_jsonb(t)), '[]'::jsonb) from public.customer_categories t),
+    'customers', (select coalesce(jsonb_agg(to_jsonb(t)), '[]'::jsonb) from public.customers t),
+    'balances', (select coalesce(jsonb_agg(to_jsonb(t)), '[]'::jsonb) from public.balances t),
+    'balance_history', (select coalesce(jsonb_agg(to_jsonb(t)), '[]'::jsonb) from public.balance_history t),
+    'due_dates', (select coalesce(jsonb_agg(to_jsonb(t)), '[]'::jsonb) from public.due_dates t),
+    'followups', (select coalesce(jsonb_agg(to_jsonb(t)), '[]'::jsonb) from public.followups t),
+    'collections', (select coalesce(jsonb_agg(to_jsonb(t)), '[]'::jsonb) from public.collections t),
+    'incentives', (select coalesce(jsonb_agg(to_jsonb(t)), '[]'::jsonb) from public.incentives t),
+    'incentive_payments', (select coalesce(jsonb_agg(to_jsonb(t)), '[]'::jsonb) from public.incentive_payments t),
+    'notifications', (select coalesce(jsonb_agg(to_jsonb(t)), '[]'::jsonb) from public.notifications t),
+    'excel_imports', (select coalesce(jsonb_agg(to_jsonb(t)), '[]'::jsonb) from public.excel_imports t),
+    'collector_tier_settings', (select coalesce(jsonb_agg(to_jsonb(t)), '[]'::jsonb) from public.collector_tier_settings t),
+    'customer_personal_assignments', (select coalesce(jsonb_agg(to_jsonb(t)), '[]'::jsonb) from public.customer_personal_assignments t),
+    'custom_reminders', (select coalesce(jsonb_agg(to_jsonb(t)), '[]'::jsonb) from public.custom_reminders t)
+  );
+
+  -- إحصاء عدد السجلات في كل جدول
+  v_counts := jsonb_build_object(
+    'settings', (select count(*) from public.settings),
+    'customer_categories', (select count(*) from public.customer_categories),
+    'customers', (select count(*) from public.customers),
+    'balances', (select count(*) from public.balances),
+    'balance_history', (select count(*) from public.balance_history),
+    'due_dates', (select count(*) from public.due_dates),
+    'followups', (select count(*) from public.followups),
+    'collections', (select count(*) from public.collections),
+    'incentives', (select count(*) from public.incentives),
+    'incentive_payments', (select count(*) from public.incentive_payments),
+    'notifications', (select count(*) from public.notifications),
+    'excel_imports', (select count(*) from public.excel_imports),
+    'collector_tier_settings', (select count(*) from public.collector_tier_settings),
+    'customer_personal_assignments', (select count(*) from public.customer_personal_assignments),
+    'custom_reminders', (select count(*) from public.custom_reminders)
+  );
+
+  -- حساب البصمة الرقمية للبيانات (دالة sha256 أصلية في بوستجريس)
+  v_checksum := encode(sha256(convert_to(v_tables::text, 'UTF8')), 'hex');
+
+  -- بناء الـ Payload النهائي المتكامل
+  v_payload := jsonb_build_object(
+    'manifest', jsonb_build_object(
+      'format_version', '2.0',
+      'app_version', 'SCP-V2',
+      'backup_type', coalesce(p_backup_type, 'manual'),
+      'backup_id', v_backup_id,
+      'backup_name', v_backup_name,
+      'file_name', v_file_name,
+      'checksum_sha256', v_checksum,
+      'created_at', now(),
+      'created_by_username', coalesce(v_username, 'admin'),
+      'created_by_user_id', v_user_id,
+      'notes', p_notes,
+      'table_counts', v_counts
+    ),
+    'tables', v_tables
+  );
+
+  -- حفظ سجل النسخة في جدول system_backups
+  insert into public.system_backups (
+    id, backup_name, file_name, file_size_bytes, backup_type,
+    checksum_sha256, table_counts, notes, created_by, created_at
+  ) values (
+    v_backup_id, v_backup_name, v_file_name,
+    octet_length(v_payload::text),
+    coalesce(p_backup_type, 'manual'),
+    v_checksum,
+    v_counts,
+    p_notes,
+    v_user_id,
+    now()
+  );
+
+  -- توثيق العملية في سجل التدقيق الأمني
+  insert into public.activity_logs (
+    user_id, action, entity_type, entity_id, details
+  ) values (
+    v_user_id,
+    'create_backup',
+    'system_backup',
+    v_backup_id::text,
+    jsonb_build_object(
+      'file_name', v_file_name,
+      'backup_type', coalesce(p_backup_type, 'manual'),
+      'checksum_sha256', v_checksum,
+      'total_customers', (select count(*) from public.customers),
+      'total_followups', (select count(*) from public.followups)
+    )
+  );
+
+  return v_payload;
+end;
+$$;
+
+-- ب. دالة حذف سجل النسخة الاحتياطية
+create or replace function public.delete_system_backup_record(
+  p_backup_id uuid
+)
+returns boolean
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_user_id uuid := auth.uid();
+begin
+  if not (public.is_active_user() and public.is_admin()) then
+    raise exception 'غير مصرح: حذف سجلات النسخ الاحتياطية محصور بمدير النظام';
+  end if;
+
+  delete from public.system_backups where id = p_backup_id;
+
+  insert into public.activity_logs (
+    user_id, action, entity_type, entity_id, details
+  ) values (
+    v_user_id,
+    'delete_backup_record',
+    'system_backup',
+    p_backup_id::text,
+    jsonb_build_object('deleted_at', now())
+  );
+
+  return true;
+end;
+$$;
+
+-- ج. دالة فحص وتدقيق حزمة النسخة الاحتياطية قبل الاستعادة
+create or replace function public.validate_system_backup_payload(
+  p_payload jsonb
+)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_manifest jsonb;
+  v_tables jsonb;
+  v_format_version text;
+  v_table_counts jsonb := '{}'::jsonb;
+begin
+  if not (public.is_active_user() and public.is_admin()) then
+    raise exception 'غير مصرح: فحص النسخ الاحتياطية محصور بمدير النظام فقط';
+  end if;
+
+  if p_payload is null or not (p_payload ? 'manifest') or not (p_payload ? 'tables') then
+    raise exception 'ملف النسخة الاحتياطية غير صالح: تنقصه بيانات الميتاداتا أو الجداول الأساسية';
+  end if;
+
+  v_manifest := p_payload->'manifest';
+  v_tables := p_payload->'tables';
+  v_format_version := v_manifest->>'format_version';
+
+  if v_format_version is null or v_format_version not in ('1.0', '2.0') then
+    raise exception 'إصدار النسخة الاحتياطية غير متوافق مع هذا النظام (الإصدار الحالي: 2.0)';
+  end if;
+
+  -- حساب عدد السجلات في كل جدول بالحزمة
+  v_table_counts := jsonb_build_object(
+    'settings', jsonb_array_length(coalesce(v_tables->'settings', '[]'::jsonb)),
+    'customer_categories', jsonb_array_length(coalesce(v_tables->'customer_categories', '[]'::jsonb)),
+    'customers', jsonb_array_length(coalesce(v_tables->'customers', '[]'::jsonb)),
+    'balances', jsonb_array_length(coalesce(v_tables->'balances', '[]'::jsonb)),
+    'due_dates', jsonb_array_length(coalesce(v_tables->'due_dates', '[]'::jsonb)),
+    'followups', jsonb_array_length(coalesce(v_tables->'followups', '[]'::jsonb)),
+    'collections', jsonb_array_length(coalesce(v_tables->'collections', '[]'::jsonb)),
+    'incentives', jsonb_array_length(coalesce(v_tables->'incentives', '[]'::jsonb)),
+    'custom_reminders', jsonb_array_length(coalesce(v_tables->'custom_reminders', '[]'::jsonb))
+  );
+
+  return jsonb_build_object(
+    'is_valid', true,
+    'manifest', v_manifest,
+    'table_counts', v_table_counts,
+    'current_database_counts', jsonb_build_object(
+      'customers', (select count(*) from public.customers),
+      'balances', (select count(*) from public.balances),
+      'followups', (select count(*) from public.followups),
+      'collections', (select count(*) from public.collections),
+      'custom_reminders', (select count(*) from public.custom_reminders)
+    )
+  );
+end;
+$$;
+
+-- د. دالة الاستعادة الذرية الكاملة والشاملة
+create or replace function public.restore_system_backup(
+  p_payload jsonb,
+  p_create_safety_snapshot boolean default true
+)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_user_id uuid := auth.uid();
+  v_manifest jsonb;
+  v_tables jsonb;
+  v_safety_result jsonb;
+  v_restored_counts jsonb := '{}'::jsonb;
+begin
+  -- 1. التحقق الأمني من المدير
+  if not (public.is_active_user() and public.is_admin()) then
+    raise exception 'غير مصرح: استعادة النظام محصورة بمدير النظام فقط';
+  end if;
+
+  -- 2. التحقق من صحة الحزمة
+  if p_payload is null or not (p_payload ? 'tables') then
+    raise exception 'هيكل ملف النسخة الاحتياطية غير صالح';
+  end if;
+
+  v_manifest := p_payload->'manifest';
+  v_tables := p_payload->'tables';
+
+  -- 3. أخذ نقطة أمان آلية قبل البدء (إذا تم طلبها)
+  if coalesce(p_create_safety_snapshot, true) then
+    v_safety_result := public.generate_system_backup_json(
+      'safety_pre_restore',
+      'نقطة أمان تلقائية تم أخذها تلقائياً قبل تنفيذ عملية استعادة النظام'
+    );
+  end if;
+
+  -- 4. إيقاف الـ Triggers مؤقتاً لتجنب تكرار الحوافز وسجلات التدقيق أثناء الإدخال الشامل
+  set local session_replication_role = 'replica';
+
+  -- 5. مسح الجداول بالترتيب العكسي للتبعيات (مع where true لتجاوز قيود safeupdate)
+  delete from public.custom_reminders where true;
+  delete from public.customer_personal_assignments where true;
+  delete from public.collector_tier_settings where true;
+  delete from public.notifications where true;
+  delete from public.incentive_payments where true;
+  delete from public.incentives where true;
+  delete from public.collections where true;
+  delete from public.followups where true;
+  delete from public.due_dates where true;
+  delete from public.balance_history where true;
+  delete from public.balances where true;
+  delete from public.customers where true;
+  delete from public.excel_imports where true;
+  delete from public.customer_categories where true;
+  delete from public.settings where true;
+
+  -- 6. إعادة ملء الجداول بالترتيب الطوبولوجي الصحيح
+  -- أ. الإعدادات
+  if v_tables ? 'settings' and jsonb_array_length(v_tables->'settings') > 0 then
+    insert into public.settings select * from jsonb_populate_recordset(null::public.settings, v_tables->'settings');
+  end if;
+
+  -- ب. فئات العملاء
+  if v_tables ? 'customer_categories' and jsonb_array_length(v_tables->'customer_categories') > 0 then
+    insert into public.customer_categories select * from jsonb_populate_recordset(null::public.customer_categories, v_tables->'customer_categories');
+  end if;
+
+  -- ج. سجل الاستيراد
+  if v_tables ? 'excel_imports' and jsonb_array_length(v_tables->'excel_imports') > 0 then
+    insert into public.excel_imports select * from jsonb_populate_recordset(null::public.excel_imports, v_tables->'excel_imports');
+  end if;
+
+  -- د. العملاء
+  if v_tables ? 'customers' and jsonb_array_length(v_tables->'customers') > 0 then
+    insert into public.customers select * from jsonb_populate_recordset(null::public.customers, v_tables->'customers');
+  end if;
+
+  -- هـ. الأرصدة وسجلها والاستحقاق
+  if v_tables ? 'balances' and jsonb_array_length(v_tables->'balances') > 0 then
+    insert into public.balances select * from jsonb_populate_recordset(null::public.balances, v_tables->'balances');
+  end if;
+  if v_tables ? 'balance_history' and jsonb_array_length(v_tables->'balance_history') > 0 then
+    insert into public.balance_history select * from jsonb_populate_recordset(null::public.balance_history, v_tables->'balance_history');
+  end if;
+  if v_tables ? 'due_dates' and jsonb_array_length(v_tables->'due_dates') > 0 then
+    insert into public.due_dates select * from jsonb_populate_recordset(null::public.due_dates, v_tables->'due_dates');
+  end if;
+
+  -- و. المتابعات والدفعات والحوافز
+  if v_tables ? 'followups' and jsonb_array_length(v_tables->'followups') > 0 then
+    insert into public.followups select * from jsonb_populate_recordset(null::public.followups, v_tables->'followups');
+  end if;
+  if v_tables ? 'collections' and jsonb_array_length(v_tables->'collections') > 0 then
+    insert into public.collections select * from jsonb_populate_recordset(null::public.collections, v_tables->'collections');
+  end if;
+  if v_tables ? 'incentives' and jsonb_array_length(v_tables->'incentives') > 0 then
+    insert into public.incentives select * from jsonb_populate_recordset(null::public.incentives, v_tables->'incentives');
+  end if;
+  if v_tables ? 'incentive_payments' and jsonb_array_length(v_tables->'incentive_payments') > 0 then
+    insert into public.incentive_payments select * from jsonb_populate_recordset(null::public.incentive_payments, v_tables->'incentive_payments');
+  end if;
+
+  -- ز. التنبيهات
+  if v_tables ? 'notifications' and jsonb_array_length(v_tables->'notifications') > 0 then
+    insert into public.notifications select * from jsonb_populate_recordset(null::public.notifications, v_tables->'notifications');
+  end if;
+
+  -- ح. بيانات V2: الفئات الشخصية والتذكيرات
+  if v_tables ? 'collector_tier_settings' and jsonb_array_length(v_tables->'collector_tier_settings') > 0 then
+    insert into public.collector_tier_settings select * from jsonb_populate_recordset(null::public.collector_tier_settings, v_tables->'collector_tier_settings');
+  end if;
+  if v_tables ? 'customer_personal_assignments' and jsonb_array_length(v_tables->'customer_personal_assignments') > 0 then
+    insert into public.customer_personal_assignments select * from jsonb_populate_recordset(null::public.customer_personal_assignments, v_tables->'customer_personal_assignments');
+  end if;
+  if v_tables ? 'custom_reminders' and jsonb_array_length(v_tables->'custom_reminders') > 0 then
+    insert into public.custom_reminders select * from jsonb_populate_recordset(null::public.custom_reminders, v_tables->'custom_reminders');
+  end if;
+
+  -- 7. إعادة تفعيل الـ Triggers للوضع الطبيعي
+  set local session_replication_role = 'origin';
+
+  -- 8. حساب الإحصائيات بعد الاستعادة
+  v_restored_counts := jsonb_build_object(
+    'customers', (select count(*) from public.customers),
+    'balances', (select count(*) from public.balances),
+    'followups', (select count(*) from public.followups),
+    'collections', (select count(*) from public.collections),
+    'custom_reminders', (select count(*) from public.custom_reminders)
+  );
+
+  -- 9. تسجيل العملية في سجل التدقيق الأمني
+  insert into public.activity_logs (
+    user_id, action, entity_type, entity_id, details
+  ) values (
+    v_user_id,
+    'restore_backup',
+    'system_restore',
+    coalesce(v_manifest->>'backup_id', gen_random_uuid()::text),
+    jsonb_build_object(
+      'backup_name', v_manifest->>'backup_name',
+      'created_at_in_backup', v_manifest->>'created_at',
+      'safety_snapshot_created', coalesce(p_create_safety_snapshot, true),
+      'restored_counts', v_restored_counts
+    )
+  );
+
+  return jsonb_build_object(
+    'success', true,
+    'message', 'تمت استعادة كافة بيانات النظام بنجاح تام',
+    'restored_counts', v_restored_counts,
+    'safety_snapshot_id', v_safety_result->'manifest'->>'backup_id'
+  );
+end;
+$$;

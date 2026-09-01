@@ -1,14 +1,19 @@
 import { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useProfile } from '@/features/auth/AuthContext';
-import { useCategories, useCustomers, useSettings, useUserNames } from '@/lib/queries';
+import { useCategories, useCustomers, usePersonalAssignments, useSettings, useUserNames } from '@/lib/queries';
 import { DataTable, type Column } from '@/components/ui/DataTable';
 import { DuePill } from '@/components/ui/Pill';
+import { IconClock, IconSettings } from '@/components/ui/Icons';
 import { FollowupModal } from './FollowupModal';
+import { PersonalTiersSettingsModal } from './PersonalTiersSettingsModal';
+import { PersonalTierFilterTabs } from './PersonalTierFilterTabs';
+import { PersonalTierSelector } from './PersonalTierSelector';
+import { RemindMeModal } from '@/features/reminders/RemindMeModal';
 import { classifyDue } from '@/lib/logic/dates';
 import { fmt } from '@/lib/logic/money';
 import { screenAction, visibleFields } from '@/lib/permissions';
-import type { CustomerOverview } from '@/types/models';
+import type { CustomerOverview, PersonalTierKey } from '@/types/models';
 
 /**
  * شاشة متابعة العملاء — "قلب النظام" بتعبير العميل: جدول العمل اليومي مرتّباً
@@ -20,11 +25,15 @@ export function FollowupsScreen() {
   const { data: settings } = useSettings();
   const { data: customers = [], isLoading } = useCustomers();
   const { data: categories = [] } = useCategories();
+  const { data: personalAssignments = [] } = usePersonalAssignments();
   const userNames = useUserNames();
 
   const [search, setSearch] = useState('');
   const [categoryId, setCategoryId] = useState('');
+  const [selectedPersonalTier, setSelectedPersonalTier] = useState<PersonalTierKey | 'ALL'>('ALL');
   const [target, setTarget] = useState<CustomerOverview | null>(null);
+  const [remindTarget, setRemindTarget] = useState<CustomerOverview | null>(null);
+  const [tiersModalOpen, setTiersModalOpen] = useState(false);
 
   const canAddFollowup = screenAction(profile, 'followups', 'create');
   const fields = visibleFields(profile, 'followups');
@@ -33,6 +42,29 @@ export function FollowupsScreen() {
     daysBeforeDueAlert: settings?.days_before_due_alert ?? 3,
     overdueAlertDays: settings?.overdue_alert_days ?? 35,
   };
+
+  const assignmentMap = useMemo(() => {
+    return new Map<string, PersonalTierKey>(
+      personalAssignments.map((a) => [a.customer_id, a.tier_key]),
+    );
+  }, [personalAssignments]);
+
+  const tierCounts = useMemo(() => {
+    const counts: Record<PersonalTierKey | 'ALL', number> = {
+      ALL: 0,
+      A: 0,
+      B: 0,
+      C: 0,
+      D: 0,
+    };
+    const activeCusts = customers.filter((c) => c.is_active);
+    counts.ALL = activeCusts.length;
+    for (const c of activeCusts) {
+      const tier = assignmentMap.get(c.id) ?? 'D';
+      counts[tier] = (counts[tier] ?? 0) + 1;
+    }
+    return counts;
+  }, [customers, assignmentMap]);
 
   const rows = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -45,8 +77,13 @@ export function FollowupsScreen() {
           c.customer_number.includes(q),
       )
       .filter((c) => !categoryId || c.customer_category_id === categoryId)
+      .filter((c) => {
+        if (selectedPersonalTier === 'ALL') return true;
+        const tier = assignmentMap.get(c.id) ?? 'D';
+        return tier === selectedPersonalTier;
+      })
       .sort((a, b) => (a.remaining_days ?? 9999) - (b.remaining_days ?? 9999));
-  }, [customers, search, categoryId]);
+  }, [customers, search, categoryId, selectedPersonalTier, assignmentMap]);
 
   // العمود يُبنى مرة واحدة ثم يُفلتر حسب صلاحيات إخفاء الأعمدة لهذا المستخدم
   const allColumns: Record<string, Column<CustomerOverview>> = {
@@ -72,6 +109,17 @@ export function FollowupsScreen() {
         ) : (
           '—'
         ),
+    },
+    personal_tier: {
+      key: 'personal_tier',
+      label: 'التصنيف الشخصي',
+      render: (c) => (
+        <PersonalTierSelector
+          customerId={c.id}
+          currentTierKey={assignmentMap.get(c.id) ?? 'D'}
+          compact
+        />
+      ),
     },
     remaining: {
       key: 'remaining',
@@ -111,6 +159,12 @@ export function FollowupsScreen() {
 
   return (
     <>
+      <PersonalTierFilterTabs
+        selectedTier={selectedPersonalTier}
+        onSelectTier={setSelectedPersonalTier}
+        counts={tierCounts}
+      />
+
       <div className="toolbar">
         <input
           type="text"
@@ -131,6 +185,15 @@ export function FollowupsScreen() {
             </option>
           ))}
         </select>
+        <button
+          type="button"
+          className="btn btn-outline btn-sm gap-1.5"
+          onClick={() => setTiersModalOpen(true)}
+          title="تخصيص مسميات فئاتي الشخصية (أ / ب / ج / د)"
+        >
+          <IconSettings className="h-3.5 w-3.5" />
+          <span>تخصيص فئاتي</span>
+        </button>
       </div>
 
       <DataTable
@@ -145,10 +208,19 @@ export function FollowupsScreen() {
           <>
             <button
               type="button"
-              className="btn btn-outline btn-sm"
+              className="btn btn-outline btn-sm text-gray-700"
               onClick={() => navigate(`/customers/${c.id}`)}
             >
               تفاصيل
+            </button>
+            <button
+              type="button"
+              className="btn btn-outline btn-sm gap-1.5 text-amber-700 hover:bg-amber-50 hover:border-amber-300"
+              onClick={() => setRemindTarget(c)}
+              title="إضافة تذكير حر لهذا العميل"
+            >
+              <IconClock className="h-3.5 w-3.5" />
+              <span>ذكرني</span>
             </button>
             {canAddFollowup && (
               <button type="button" className="btn btn-primary btn-sm" onClick={() => setTarget(c)}>
@@ -167,6 +239,20 @@ export function FollowupsScreen() {
           onClose={() => setTarget(null)}
         />
       )}
+
+      {remindTarget && (
+        <RemindMeModal
+          open
+          customerId={remindTarget.id}
+          customerName={remindTarget.customer_name}
+          onClose={() => setRemindTarget(null)}
+        />
+      )}
+
+      <PersonalTiersSettingsModal
+        open={tiersModalOpen}
+        onClose={() => setTiersModalOpen(false)}
+      />
     </>
   );
 }

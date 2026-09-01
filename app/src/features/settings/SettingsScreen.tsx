@@ -23,10 +23,12 @@ import {
   IconTag,
   IconHistory,
   IconCalculator,
+  IconArchive,
 } from '@/components/ui/Icons';
+import { BackupRestoreCenter } from './backups/BackupRestoreCenter';
 import type { AppSettings, CustomerCategory } from '@/types/models';
 
-type SettingsTab = 'general' | 'alerts' | 'currencies' | 'categories' | 'audit';
+type SettingsTab = 'general' | 'alerts' | 'currencies' | 'categories' | 'audit' | 'backups';
 
 export function SettingsScreen() {
   const profile = useProfile();
@@ -285,6 +287,12 @@ export function SettingsScreen() {
           label="سجل تدقيق الإعدادات"
           icon={<IconHistory className="h-4 w-4" />}
         />
+        <TabButton
+          active={activeTab === 'backups'}
+          onClick={() => setActiveTab('backups')}
+          label="النسخ الاحتياطي والاستعادة"
+          icon={<IconArchive className="h-4 w-4" />}
+        />
       </div>
 
       {/* ------------------------------------------------ Tab Contents */}
@@ -308,6 +316,8 @@ export function SettingsScreen() {
       )}
 
       {activeTab === 'audit' && <AuditTrailTab />}
+
+      {activeTab === 'backups' && <BackupRestoreCenter />}
 
       {/* ------------------------------------------------ Floating / Sticky Save Bar */}
       {isDirty && (

@@ -11,7 +11,7 @@ import {
 } from '@/lib/queries';
 import { DataTable, type Column } from '@/components/ui/DataTable';
 import { NotificationPill, Pill } from '@/components/ui/Pill';
-import { NOTIF_ICONS } from '@/components/ui/Icons';
+import { IconCheck, NOTIF_ICONS } from '@/components/ui/Icons';
 import { errorMessage, useToast } from '@/components/ui/Toast';
 import {
   NOTIFICATION_META,
@@ -23,6 +23,7 @@ import { isAccountant, isAdmin } from '@/lib/permissions';
 import { fmt } from '@/lib/logic/money';
 import { daysBetween, todayStr } from '@/lib/logic/dates';
 import { FollowupModal } from '@/features/followups/FollowupModal';
+import { CustomRemindersSection } from '@/features/reminders/CustomRemindersSection';
 import type { AppNotification } from '@/types/models';
 
 /**
@@ -199,6 +200,8 @@ export function NotificationsScreen() {
 
   return (
     <>
+      <CustomRemindersSection />
+
       <div className="mb-5 grid grid-cols-2 gap-3 lg:grid-cols-6">
         {NOTIFICATION_TYPES.map((type) => {
           const meta = NOTIFICATION_META[type];
@@ -313,14 +316,15 @@ export function NotificationsScreen() {
             {n.status !== 'تم التعامل' && canHandle(n) && (
               <button
                 type="button"
-                className="btn btn-primary btn-sm"
+                className="btn btn-primary btn-sm gap-1"
                 onClick={() =>
                   void handle
                     .mutateAsync(n.id)
                     .catch((e) => toast.error(errorMessage(e)))
                 }
               >
-                ✓ إنجاز
+                <IconCheck className="h-3.5 w-3.5" />
+                <span>إنجاز</span>
               </button>
             )}
           </div>

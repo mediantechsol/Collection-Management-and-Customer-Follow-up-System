@@ -7,14 +7,18 @@ import {
   useEscalateCustomer,
   useFollowups,
   useNotifications,
+  usePersonalAssignments,
   useSettings,
   useUserNames,
 } from '@/lib/queries';
 import { CustomerModal } from './CustomerModal';
 import { FollowupModal } from '@/features/followups/FollowupModal';
 import { CollectionModal } from '@/features/collections/CollectionModal';
+import { RemindMeModal } from '@/features/reminders/RemindMeModal';
+import { PersonalTierSelector } from '@/features/followups/PersonalTierSelector';
 import { CategoryDot, DuePill, NotificationPill, Pill } from '@/components/ui/Pill';
 import { Modal } from '@/components/ui/Modal';
+import { IconClock, IconFileText, IconImage, IconPaperclip } from '@/components/ui/Icons';
 import { errorMessage, useToast } from '@/components/ui/Toast';
 import { classifyDue } from '@/lib/logic/dates';
 import { CURRENCY_LABELS, fmt } from '@/lib/logic/money';
@@ -41,13 +45,17 @@ export function CustomerDetailScreen() {
   const { data: followups = [] } = useFollowups(id);
   const { data: notifications = [] } = useNotifications();
   const { data: collections = [] } = useCollections();
+  const { data: personalAssignments = [] } = usePersonalAssignments();
   const { data: settings } = useSettings();
   const userNames = useUserNames();
   const escalate = useEscalateCustomer();
 
+  const currentPersonalTier = personalAssignments.find((a) => a.customer_id === id)?.tier_key ?? 'D';
+
   const [editOpen, setEditOpen] = useState(false);
   const [followupOpen, setFollowupOpen] = useState(false);
   const [collectionOpen, setCollectionOpen] = useState(false);
+  const [remindOpen, setRemindOpen] = useState(false);
 
   // حالة معاينة الصور المرفقة
   const [previewImage, setPreviewImage] = useState<{ url: string; title: string } | null>(null);
@@ -154,6 +162,11 @@ export function CustomerDetailScreen() {
             )}
           </div>
         </div>
+
+        <div className="mt-3.5 flex items-center gap-2.5 border-t border-gray-100 pt-3">
+          <span className="text-xs font-semibold text-gray-600">تصنيفي الشخصي للعميل:</span>
+          <PersonalTierSelector customerId={customer.id} currentTierKey={currentPersonalTier} />
+        </div>
       </div>
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
@@ -228,7 +241,13 @@ export function CustomerDetailScreen() {
                     {hasAttachment && f.attachment_url && (
                       <div className="mt-2.5 flex flex-wrap items-center justify-between gap-2 rounded-md border border-blue-100 bg-blue-50/60 px-3 py-2 text-xs dark:border-blue-900/40 dark:bg-blue-950/20">
                         <div className="flex items-center gap-2 overflow-hidden">
-                          <span className="text-base">{isImg ? '🖼️' : isPdf ? '📄' : '📎'}</span>
+                          {isImg ? (
+                            <IconImage className="h-4 w-4 text-blue-600 shrink-0" />
+                          ) : isPdf ? (
+                            <IconFileText className="h-4 w-4 text-red-600 shrink-0" />
+                          ) : (
+                            <IconPaperclip className="h-4 w-4 text-gray-500 shrink-0" />
+                          )}
                           <span className="truncate font-medium text-blue-900 dark:text-blue-200">
                             {attachName}
                           </span>
@@ -378,6 +397,14 @@ export function CustomerDetailScreen() {
                 تسجيل دفعة محصّلة
               </button>
             )}
+            <button
+              type="button"
+              className="btn btn-outline gap-1.5 text-amber-700 hover:bg-amber-50 hover:border-amber-300"
+              onClick={() => setRemindOpen(true)}
+            >
+              <IconClock className="h-4 w-4" />
+              <span>إضافة تذكير حر</span>
+            </button>
             {canEdit && (
               <button type="button" className="btn btn-outline" onClick={() => setEditOpen(true)}>
                 تعديل بيانات العميل
@@ -411,6 +438,14 @@ export function CustomerDetailScreen() {
           open
           customer={customer}
           onClose={() => setCollectionOpen(false)}
+        />
+      )}
+      {remindOpen && (
+        <RemindMeModal
+          open
+          customerId={customer.id}
+          customerName={customer.customer_name}
+          onClose={() => setRemindOpen(false)}
         />
       )}
 

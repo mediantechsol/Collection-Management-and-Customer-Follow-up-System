@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Modal } from '@/components/ui/Modal';
 import { errorMessage, useToast } from '@/components/ui/Toast';
+import { IconZap } from '@/components/ui/Icons';
 import { useAdminUserAction, useCategories, useSaveUserPermissions } from '@/lib/queries';
 import {
   ACTION_CATALOG,
@@ -269,8 +270,9 @@ export function UserModal({ existing, roles, allUsers, onClose }: Props) {
       {/* -------------------------------------------------- نسخ الصلاحيات */}
       {isAdmin(profile) && copySourceCandidates.length > 0 && (
         <div className="mt-4 rounded-lg border border-blue-200 bg-blue-50 px-4 py-3">
-          <div className="mb-2 text-[13px] font-bold text-blue-800">
-            ⚡ نسخ الصلاحيات من مستخدم آخر
+          <div className="mb-2 flex items-center gap-1.5 text-[13px] font-bold text-blue-800">
+            <IconZap className="h-4 w-4 text-amber-500 shrink-0" />
+            <span>نسخ الصلاحيات من مستخدم آخر</span>
           </div>
           <div className="flex items-end gap-2">
             <div className="field mb-0 flex-1">
@@ -291,11 +293,12 @@ export function UserModal({ existing, roles, allUsers, onClose }: Props) {
             <button
               type="button"
               id="copy-permissions-btn"
-              className="btn btn-primary btn-sm whitespace-nowrap"
+              className="btn btn-primary btn-sm whitespace-nowrap gap-1.5"
               disabled={!copySourceId}
               onClick={applyCopyPermissions}
             >
-              ⚡ نسخ
+              <IconZap className="h-3.5 w-3.5" />
+              <span>نسخ</span>
             </button>
           </div>
           <p className="mt-1.5 text-[11px] text-blue-600">
