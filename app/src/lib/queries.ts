@@ -242,6 +242,20 @@ export function useAddFollowup() {
     mutationFn: async (values: Omit<Followup, 'id' | 'created_at'>) => {
       const { error } = await supabase.from('followups').insert(values);
       raise(error);
+
+      // استدعاء الدالة التي تُحدِّث التنبيهات فوراً بعد إضافة المتابعة:
+      // - تحذف تنبيه 'stale' إن كان موجوداً (لأن المتابعة تثبت عدم الإهمال)
+      // - تُنشئ 'promise_today' إن كانت النتيجة تحتوي على كلمة الوعد وموعده اليوم
+      // الدالة security definer وتعمل لكل الأدوار (مسؤول تحصيل، محاسب، مدير)
+      const { error: notifyErr } = await supabase.rpc('notify_after_followup', {
+        p_followup_id:   values.customer_id, // UUID مؤقت — الدالة لا تحتاجه فعلياً لكنه مطلوب كمعامل
+        p_customer_id:   values.customer_id,
+        p_followup_date: values.followup_date,
+        p_next_date:     values.next_followup_date ?? null,
+        p_result:        values.contact_result ?? null,
+      });
+      // نتجاهل الخطأ بصمت حتى لا يعيق حفظ المتابعة
+      if (notifyErr) console.warn('[notify_after_followup]', notifyErr.message);
     },
     onSuccess: (_d, values) => {
       qc.invalidateQueries({ queryKey: qk.followups(values.customer_id) });
