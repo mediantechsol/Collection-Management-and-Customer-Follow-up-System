@@ -7,6 +7,7 @@
  */
 
 import type { Currency } from '@/lib/logic/money';
+export type { Currency };
 import type { RoleName, ScreenKey, ScreenPermissions } from '@/lib/permissions';
 import type { NotificationType } from '@/lib/logic/notifications';
 
@@ -255,3 +256,85 @@ export interface ImportCustomersResult {
   unmatched_assignees: string[];
   new_categories?: number;
 }
+
+/* ---------------------------------------------------------------- نماذج التقارير التحليلية */
+
+export interface AnalyticsFilters {
+  startDate?: ISODate;
+  endDate?: ISODate;
+  userId?: UUID;
+  categoryId?: UUID;
+  currency?: Currency | 'ALL';
+}
+
+export interface AnalyticsKPIs {
+  total_debt_yer: number;
+  total_collected_period_yer: number;
+  active_customers_count: number;
+  overdue_customers_count: number;
+  settled_customers_count: number;
+  team_collection_rate: number;
+}
+
+export interface CurrencyDistributionItem {
+  currency: Currency;
+  currency_name: string;
+  amount_original: number;
+  amount_yer: number;
+  percentage: number;
+}
+
+export interface CustomerStatusDistributionItem {
+  status: 'active' | 'overdue' | 'settled';
+  status_label: string;
+  count: number;
+  percentage: number;
+}
+
+export interface CollectorPerformanceItem {
+  user_id: UUID;
+  collector_name: string;
+  total_due_yer: number;
+  total_collected_yer: number;
+  customer_count: number;
+  collection_rate: number;
+}
+
+export interface MonthlyTrendItem {
+  month: string;
+  month_label: string;
+  collected_yer: number;
+  target_or_due_yer: number;
+  collection_rate: number;
+}
+
+export interface CategoryDebtItem {
+  category_id: UUID | null;
+  category_name: string;
+  category_color: string;
+  total_debt_yer: number;
+  customer_count: number;
+  percentage: number;
+}
+
+export interface TopDebtorItem {
+  customer_id: UUID;
+  customer_name: string;
+  customer_number: string;
+  category_name: string | null;
+  category_color: string | null;
+  assigned_user_name: string | null;
+  total_due_yer: number;
+  debt_percentage: number;
+  status: 'active' | 'overdue' | 'settled';
+}
+
+export interface AnalyticsChartsData {
+  debt_by_currency: CurrencyDistributionItem[];
+  customers_by_status: CustomerStatusDistributionItem[];
+  collector_performance: CollectorPerformanceItem[];
+  monthly_collection_trend: MonthlyTrendItem[];
+  category_debt: CategoryDebtItem[];
+  top_10_debtors: TopDebtorItem[];
+}
+

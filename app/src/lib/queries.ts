@@ -15,6 +15,9 @@ import { supabase } from '@/lib/supabase';
 import type { ExchangeRates } from '@/lib/logic/money';
 import type {
   ActivityLog,
+  AnalyticsChartsData,
+  AnalyticsFilters,
+  AnalyticsKPIs,
   AppNotification,
   AppSettings,
   AppUser,
@@ -57,6 +60,11 @@ export const qk = {
   incentivePayments: ['incentive_payments'] as const,
   imports: ['excel_imports'] as const,
   activity: ['activity_logs'] as const,
+  analytics: {
+    all: ['analytics'] as const,
+    summary: (filters?: AnalyticsFilters) => ['analytics', 'summary', filters ?? {}] as const,
+    charts: (filters?: AnalyticsFilters) => ['analytics', 'charts', filters ?? {}] as const,
+  },
 };
 
 /* ============================================================ الإعدادات والمراجع */
@@ -213,6 +221,7 @@ export function useSaveDueDate() {
 function invalidateCustomerData(qc: QueryClient) {
   qc.invalidateQueries({ queryKey: qk.customers });
   qc.invalidateQueries({ queryKey: qk.activity });
+  qc.invalidateQueries({ queryKey: qk.analytics.all });
 }
 
 /* ============================================================ المتابعات */
@@ -401,6 +410,7 @@ function invalidateCollectionData(qc: QueryClient) {
   qc.invalidateQueries({ queryKey: qk.collections });
   qc.invalidateQueries({ queryKey: qk.incentives });
   qc.invalidateQueries({ queryKey: qk.activity });
+  qc.invalidateQueries({ queryKey: qk.analytics.all });
 }
 
 /* ============================================================ الحوافز */
@@ -653,7 +663,45 @@ export function useUpdateSettings() {
       qc.invalidateQueries({ queryKey: qk.customers });
       qc.invalidateQueries({ queryKey: qk.notifications });
       qc.invalidateQueries({ queryKey: qk.activity });
+      qc.invalidateQueries({ queryKey: qk.analytics.all });
     },
   });
 }
+
+/* ============================================================ التقارير التحليلية */
+
+export function useAnalyticsKPIs(filters?: AnalyticsFilters) {
+  return useQuery({
+    queryKey: qk.analytics.summary(filters),
+    queryFn: async () => {
+      const { data, error } = await supabase.rpc('get_analytics_summary_kpis', {
+        p_start_date: filters?.startDate || null,
+        p_end_date: filters?.endDate || null,
+        p_user_id: filters?.userId || null,
+        p_category_id: filters?.categoryId || null,
+        p_currency: filters?.currency && filters.currency !== 'ALL' ? filters.currency : null,
+      });
+      raise(error);
+      return data as AnalyticsKPIs;
+    },
+  });
+}
+
+export function useAnalyticsCharts(filters?: AnalyticsFilters) {
+  return useQuery({
+    queryKey: qk.analytics.charts(filters),
+    queryFn: async () => {
+      const { data, error } = await supabase.rpc('get_analytics_charts_data', {
+        p_start_date: filters?.startDate || null,
+        p_end_date: filters?.endDate || null,
+        p_user_id: filters?.userId || null,
+        p_category_id: filters?.categoryId || null,
+        p_currency: filters?.currency && filters.currency !== 'ALL' ? filters.currency : null,
+      });
+      raise(error);
+      return data as AnalyticsChartsData;
+    },
+  });
+}
+
 

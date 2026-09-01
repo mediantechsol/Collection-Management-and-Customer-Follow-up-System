@@ -12,6 +12,7 @@ import { NotificationsScreen } from '@/features/notifications/NotificationsScree
 import { CollectionsScreen } from '@/features/collections/CollectionsScreen';
 import { PerformanceScreen } from '@/features/performance/PerformanceScreen';
 import { UsersScreen } from '@/features/users/UsersScreen';
+import { ReportsScreen } from '@/features/reports/ReportsScreen';
 import { SettingsScreen } from '@/features/settings/SettingsScreen';
 import { defaultScreen } from '@/lib/permissions';
 
@@ -66,6 +67,9 @@ export default function App() {
         </Route>
         <Route element={<RequireScreen screen="collections" />}>
           <Route path="/collections" element={<CollectionsScreen />} />
+        </Route>
+        <Route element={<RequireScreen screen="reports" />}>
+          <Route path="/reports" element={<ReportsScreen />} />
         </Route>
         <Route element={<RequireScreen screen="import" />}>
           <Route

@@ -23,7 +23,7 @@ describe('allowedScreens', () => {
 
   it('يُسقط أي مفتاح لا يقابل شاشة حقيقية', () => {
     // allowed_screens عمود text[] بلا قيد، فقد يحوي مفتاحاً قديماً أو خطأً إملائياً
-    expect(allowedScreens(user(['reports', 'customers', '']))).toEqual(['customers']);
+    expect(allowedScreens(user(['invalid_screen', 'customers', '']))).toEqual(['customers']);
   });
 
   it('يتحمّل قيمة غير مصفوفة', () => {
@@ -51,7 +51,7 @@ describe('defaultScreen', () => {
   });
 
   it('يُرجع null إذا كانت كل المفاتيح غير صالحة', () => {
-    expect(defaultScreen(user(['reports', 'unknown']))).toBeNull();
+    expect(defaultScreen(user(['invalid_1', 'unknown']))).toBeNull();
   });
 });
 

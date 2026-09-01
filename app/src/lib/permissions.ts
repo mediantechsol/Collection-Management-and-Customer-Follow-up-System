@@ -27,6 +27,7 @@ export const SCREENS = [
   'customers',
   'notifications',
   'collections',
+  'reports',
   'import',
   'performance',
   'users',
@@ -40,6 +41,7 @@ export const SCREEN_LABELS: Record<ScreenKey, string> = {
   customers: 'العملاء',
   notifications: 'التنبيهات',
   collections: 'الدفعات المحصّلة',
+  reports: 'التقارير التحليلية',
   import: 'استيراد Excel',
   performance: 'الأداء والحوافز',
   users: 'المستخدمون والصلاحيات',
@@ -186,6 +188,10 @@ export const ACTION_CATALOG: Partial<Record<ScreenKey, CatalogEntry[]>> = {
   settings: [
     { key: 'edit', label: 'تعديل الإعدادات العامة والتنبيهات' },
   ],
+  reports: [
+    { key: 'export_excel', label: 'تصدير إكسل' },
+    { key: 'export_pdf', label: 'تصدير تقرير PDF' },
+  ],
 };
 
 /**
@@ -203,6 +209,7 @@ export function roleDefaultAction(role: RoleName, screen: ScreenKey, action: str
   if (screen === 'followups' && action === 'create') return true;
   // الدفعات والاعتماد شأن محاسبي بحت
   if (screen === 'collections') return role === 'المحاسب';
+  if (screen === 'reports') return true; // متاح التصدير لجميع من يملكون الشاشة
   if (screen === 'users') return false;
   if (screen === 'performance') return false;
   if (screen === 'settings') return false;
