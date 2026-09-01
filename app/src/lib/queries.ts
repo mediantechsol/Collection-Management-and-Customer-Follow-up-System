@@ -246,6 +246,7 @@ export function useAddFollowup() {
     onSuccess: (_d, values) => {
       qc.invalidateQueries({ queryKey: qk.followups(values.customer_id) });
       qc.invalidateQueries({ queryKey: qk.followups() });
+      qc.invalidateQueries({ queryKey: qk.notifications });
       invalidateCustomerData(qc);
     },
   });

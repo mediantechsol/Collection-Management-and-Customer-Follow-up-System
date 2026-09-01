@@ -143,8 +143,15 @@ begin
 
   perform set_config('app.skip_audit', 'on', true);
 
-  select exchange_rate_usd, exchange_rate_sar into v_rate_usd, v_rate_sar
+  -- [إصلاح #2] استخدام COALESCE لحماية حساب amount_yer من NULL
+  select coalesce(exchange_rate_usd, 530),
+         coalesce(exchange_rate_sar, 141)
+  into v_rate_usd, v_rate_sar
   from public.settings limit 1;
+
+  -- في حالة عدم وجود صف في settings نضمن قيمة افتراضية آمنة
+  v_rate_usd := coalesce(v_rate_usd, 530);
+  v_rate_sar := coalesce(v_rate_sar, 141);
 
   insert into public.excel_imports(file_name, file_type, imported_by, status)
   values (p_file_name, 'balances', v_uid, 'نجاح')
@@ -205,11 +212,25 @@ begin
     from public.balance_history h
     join public.customers c on c.id = h.customer_id
     where h.import_id = v_import_id
-      and h.credit > h.prev_credit
-      -- شرط وجود رصيد سابق فعلي: يمنع اعتبار أرصدة أول استيراد تحصيلاً
-      and exists (
-        select 1 from public.balances b
-        where b.customer_id = h.customer_id and b.currency = h.currency
+      -- [إصلاح #3] شرط صريح: الفرق موجب فعلاً (يتجنب فشل check (amount > 0))
+      and (h.credit - h.prev_credit) > 0
+      -- [إصلاح #1] الشرط المُصلَح لاشتقاق التحصيل:
+      --   الحالة أ: عميل له رصيد سابق بنفس العملة (السيناريو الاعتيادي)
+      --   الحالة ب: عميل قائم له رصيد بأي عملة، ويظهر بعملة جديدة لأول مرة
+      --             (prev_credit = 0 يثبت أنه ليس رصيد مفتوح قديم)
+      -- كلا الحالتين يستثنيان العميل الجديد كلياً (لا رصيد بأي عملة)
+      and (
+        -- الحالة أ: له رصيد سابق بنفس العملة
+        exists (
+          select 1 from public.balances b
+          where b.customer_id = h.customer_id and b.currency = h.currency
+        )
+        or
+        -- الحالة ب: له رصيد بعملة مختلفة (عميل قائم يُضاف له قسم عملة جديد)
+        (h.prev_credit = 0 and exists (
+          select 1 from public.balances b2
+          where b2.customer_id = h.customer_id
+        ))
       );
     get diagnostics v_collections = row_count;
   end if;
