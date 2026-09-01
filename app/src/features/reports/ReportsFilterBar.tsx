@@ -64,10 +64,8 @@ export function ReportsFilterBar({ filters, onChange }: Props) {
 
   const [preset, setPreset] = useState<PeriodPreset>('month');
 
-  // استخراج مسؤولي التحصيل فقط للقائمة المنسدلة
-  const collectors = directory.filter(
-    (u) => u.name_role === 'مسؤول التحصيل' || u.name_role === 'مستخدم مخصص',
-  );
+  // إتاحة كافة المستخدمين النشطين في القائمة المنسدلة للمدير والمحاسب
+  const collectors = directory.filter((u) => u.status === 'نشط');
 
   const handlePresetChange = (newPreset: PeriodPreset) => {
     setPreset(newPreset);
@@ -75,8 +73,8 @@ export function ReportsFilterBar({ filters, onChange }: Props) {
       const { startDate, endDate } = getPresetDates(newPreset);
       onChange({
         ...filters,
-        startDate,
-        endDate,
+        startDate: startDate ?? todayStr(),
+        endDate: endDate ?? todayStr(),
       });
     }
   };
@@ -85,8 +83,8 @@ export function ReportsFilterBar({ filters, onChange }: Props) {
     setPreset('month');
     const { startDate, endDate } = getPresetDates('month');
     onChange({
-      startDate,
-      endDate,
+      startDate: startDate ?? todayStr(),
+      endDate: endDate ?? todayStr(),
       userId: undefined,
       categoryId: undefined,
       currency: 'ALL',
@@ -131,7 +129,7 @@ export function ReportsFilterBar({ filters, onChange }: Props) {
 
         {/* 2. فلتر مسؤول التحصيل */}
         <div>
-          <label className="mb-1 block text-xs font-semibold text-gray-700">مسؤول التحصيل</label>
+          <label className="mb-1 block text-xs font-semibold text-gray-700">المسؤول / المحصل</label>
           {canFilterCollectors ? (
             <select
               value={filters.userId ?? ''}
@@ -140,7 +138,7 @@ export function ReportsFilterBar({ filters, onChange }: Props) {
               }
               className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-xs font-medium text-gray-800 shadow-sm focus:border-blue-500 focus:outline-none"
             >
-              <option value="">جميع مسؤولي التحصيل</option>
+              <option value="">جميع المسؤولين والمحصلين</option>
               {collectors.map((c) => (
                 <option key={c.id} value={c.id}>
                   {c.full_name} ({c.name_role})

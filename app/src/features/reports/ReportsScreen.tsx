@@ -11,6 +11,7 @@ import { CategoryDebtChart } from '@/features/reports/charts/CategoryDebtChart';
 import { TopDebtorsTable } from '@/features/reports/TopDebtorsTable';
 import { PrintableReportView } from '@/features/reports/export/PrintableReportView';
 import { exportAnalyticsToExcel } from '@/features/reports/export/exportToExcel';
+import { printAnalyticsReportToPdf } from '@/features/reports/export/exportToPdf';
 import { IconDownload, IconPrinter } from '@/components/ui/Icons';
 import { useToast } from '@/components/ui/Toast';
 import type { AnalyticsFilters } from '@/types/models';
@@ -50,7 +51,7 @@ export function ReportsScreen() {
   };
 
   const handleExportPdf = () => {
-    window.print();
+    printAnalyticsReportToPdf({ kpis, chartsData, filters, profile });
   };
 
   return (
