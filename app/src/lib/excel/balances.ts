@@ -146,18 +146,32 @@ export function parseBalancesSheet(rows: Grid): ParseResult {
       return;
     }
 
-    // تحديد عملة القسم: عنوان القسم أولاً، ثم الترتيب. (الملاحظات تُفحص لكل صف)
-    const titleCurrency = currencyFromSectionTitle(rows, headerIdx);
-    const fallbackCurrency = SECTION_ORDER[i] ?? 'YER';
-    const sectionCurrency = titleCurrency ?? fallbackCurrency;
-
     const endRow = i + 1 < headerRows.length ? headerRows[i + 1] : rows.length;
+
+    // 1) فحص عنوان القسم
+    const titleCurrency = currencyFromSectionTitle(rows, headerIdx);
+
+    // 2) فحص مسبق لعمود الملاحظات داخل صفوف القسم لمعرفة عملة القسم المؤكدة
+    let notesCurrency: Currency | null = null;
+    for (let r = headerIdx + 1; r < endRow; r++) {
+      const c = detectCurrency(rows[r]?.[idx.notes]);
+      if (c) {
+        notesCurrency = c;
+        break;
+      }
+    }
+
+    const fallbackCurrency = SECTION_ORDER[i] ?? 'YER';
+    let effectiveCurrency = notesCurrency ?? titleCurrency ?? fallbackCurrency;
     let sectionSource: ParseResult['sections'][number]['source'] =
-      titleCurrency ? 'عنوان القسم' : 'ترتيب الأقسام';
-    let notesDecided = false;
-    // العملة المعتمدة فعلياً للقسم — تُصحَّح إن حسم عمود الملاحظات الأمر،
-    // وإلا عرضت المعاينة عملة عنوان القسم بينما استُوردت الصفوف بعملة أخرى.
-    let effectiveCurrency = sectionCurrency;
+      notesCurrency ? 'ملاحظات' : titleCurrency ? 'عنوان القسم' : 'ترتيب الأقسام';
+
+    if (notesCurrency && titleCurrency && notesCurrency !== titleCurrency) {
+      warnings.push(
+        `القسم الذي يبدأ بالصف ${headerIdx + 1}: عنوان القسم يشير إلى عملة ` +
+          `مختلفة عن عمود الملاحظات — اعتُمد عمود الملاحظات.`,
+      );
+    }
 
     for (let r = headerIdx + 1; r < endRow; r++) {
       const row = rows[r];
@@ -177,21 +191,9 @@ export function parseBalancesSheet(rows: Grid): ParseResult {
         continue;
       }
 
-      // العملة من عمود الملاحظات في هذا الصف تحديداً (أقوى مصدر)
+      // العملة من عمود الملاحظات في هذا الصف تحديداً إن وُجدت، وإلا عملة القسم المؤكدة
       const rowCurrency = detectCurrency(row![idx.notes]);
-      const currency = rowCurrency ?? sectionCurrency;
-
-      if (rowCurrency && !notesDecided) {
-        sectionSource = 'ملاحظات';
-        effectiveCurrency = rowCurrency;
-        notesDecided = true;
-        if (titleCurrency && rowCurrency !== titleCurrency) {
-          warnings.push(
-            `القسم الذي يبدأ بالصف ${headerIdx + 1}: عنوان القسم يشير إلى عملة ` +
-              `مختلفة عن عمود الملاحظات — اعتُمد عمود الملاحظات.`,
-          );
-        }
-      }
+      const currency = rowCurrency ?? effectiveCurrency;
 
       parsed.push({ customer_number, customer_name, currency, debit, credit, source_row: r + 1 });
       counts[currency]++;

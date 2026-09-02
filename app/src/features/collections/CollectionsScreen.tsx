@@ -79,12 +79,14 @@ export function CollectionsScreen() {
 
   async function onConfirm(c: Collection) {
     if (!c.user_id && !c.confirmed_at) {
-      toast.error('عيّن محصِّلاً للدفعة أولاً — بدونه لن يُحتسب أي حافز');
-      return;
+      const proceed = window.confirm(
+        'هذه الدفعة غير مسندة لمحّصل معين — هل تريد اعتمادها وتحديث الرصيد بدون احتساب حافز لمحصل؟',
+      );
+      if (!proceed) return;
     }
     try {
       await confirmCollection.mutateAsync({ id: c.id, confirmed: !c.confirmed_at });
-      toast.show(c.confirmed_at ? 'تم إلغاء الاعتماد' : 'تم اعتماد الدفعة واحتساب الحافز');
+      toast.show(c.confirmed_at ? 'تم إلغاء الاعتماد' : 'تم اعتماد الدفعة وتحديث الرصيد بنجاح');
     } catch (e) {
       toast.error(errorMessage(e));
     }

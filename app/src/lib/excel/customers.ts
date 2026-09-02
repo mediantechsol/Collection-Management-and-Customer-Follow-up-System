@@ -124,7 +124,7 @@ export function parseProfilesSheet(rows: Grid): { rows: ProfileRow[]; warnings: 
   const header = (rows[headerIdx] ?? []).map(normalizeArabic);
   const idx = {
     number: findCol(header, (h) => h.startsWith('رقم')),
-    name: findCol(header, has('اسم العميل')),
+    name: findCol(header, (h) => has('اسم العميل')(h) || has('اسم الزبون')(h) || eq('العميل')(h) || eq('الاسم')(h) || eq('الزبون')(h)),
     mobile1: findCol(header, (h) => has('جوال 1')(h) || h === normalizeArabic('الجوال')),
     mobile2: findCol(header, has('جوال 2')),
     guarantor: findCol(header, has('ضامن')),
@@ -138,8 +138,9 @@ export function parseProfilesSheet(rows: Grid): { rows: ProfileRow[]; warnings: 
     if (isEmptyRow(row)) continue;
 
     const customer_number = normalizeCustomerNumber(row![idx.number]);
-    const customer_name = idx.name >= 0 ? cellText(row![idx.name]) : null;
-    if (!customer_number || !customer_name) continue;
+    if (!customer_number) continue;
+    const nameVal = idx.name >= 0 ? cellText(row![idx.name]) : null;
+    const customer_name = nameVal && nameVal !== '0' ? nameVal : `عميل ${customer_number}`;
 
     out.push({
       customer_number,
@@ -204,12 +205,12 @@ export function parseFollowupSheet(rows: Grid): { rows: FollowupSheetRow[]; warn
   const groupHeader = (rows[headerIdx - 1] ?? []).map(normalizeArabic);
 
   const idx = {
-    number: findCol(header, eq('رقم العميل')),
-    // الشيت يسميه "اسم الزبون" لا "اسم العميل"
-    name: findCol(header, (h) => has('اسم الزبون')(h) || has('اسم العميل')(h)),
+    number: findCol(header, (h) => eq('رقم العميل')(h) || h.startsWith('رقم')),
+    // الشيت يسميه "اسم الزبون" أو "اسم العميل" أو "العميل"
+    name: findCol(header, (h) => has('اسم الزبون')(h) || has('اسم العميل')(h) || eq('العميل')(h) || eq('الاسم')(h) || eq('الزبون')(h)),
     // "مسئول متابعة التحصيل" — الهمزة تُكتب بأشكال مختلفة، فنطابق بجميع الصيغ
     assigned: findCol(header, (h) => isCollector(h) || has('التحصيل')(h)),
-    dueDate: findCol(header, eq('تاريخ الاستحقاق')),
+    dueDate: findCol(header, (h) => has('الاستحقاق')(h)),
     category: findCol(header, isCategory),
   };
 
@@ -307,11 +308,14 @@ export function parseCustomersWorkbook(input: {
       existing.note_2 = f.note_2 ?? existing.note_2;
       continue;
     }
-    // عميل موجود في شيت المتابعة فقط — يُستورد إن كان له اسم
-    if (!f.customer_name) continue;
+    // عميل موجود في شيت المتابعة فقط:
+    // إذا كان له اسم، أو كان له بيانات متابعة فعلية (تاريخ استحقاق، مسؤول، فئة، ملاحظة)، يُستورد ولا يُسقط
+    const hasData = !!(f.customer_name || f.due_date || f.assigned_name || f.category_name || f.note_1 || f.note_2);
+    if (!hasData) continue;
+
     merged.set(f.customer_number, {
       customer_number: f.customer_number,
-      customer_name: f.customer_name,
+      customer_name: f.customer_name ?? `عميل ${f.customer_number}`,
       mobile_1: null,
       mobile_2: null,
       guarantor: null,
